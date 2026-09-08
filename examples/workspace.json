@@ -1,0 +1,73 @@
+{
+  "version": 2,
+  "name": "fullstack",
+  "layout": {
+    "version": 2,
+    "terminals": [
+      {
+        "id": "t-fullstack-api",
+        "name": "api",
+        "cwd": "~/Documents/Git/example/api",
+        "startupCommands": [
+          "go run ./cmd/api"
+        ],
+        "frame": [
+          0,
+          0,
+          0.6,
+          0.5
+        ],
+        "z": 0,
+        "environment": "production"
+      },
+      {
+        "id": "t-fullstack-web",
+        "name": "web",
+        "cwd": "~/Documents/Git/example/web",
+        "startupCommands": [
+          "npm run dev"
+        ],
+        "frame": [
+          0.6,
+          0,
+          0.4,
+          0.5
+        ],
+        "z": 1,
+        "environment": "development"
+      },
+      {
+        "id": "t-fullstack-py",
+        "name": "worker",
+        "cwd": "~/Documents/Git/example/worker",
+        "startupCommands": [
+          "source .venv/bin/activate",
+          "python worker.py"
+        ],
+        "frame": [
+          0,
+          0.5,
+          0.6,
+          0.5
+        ],
+        "z": 2,
+        "environment": "staging"
+      },
+      {
+        "id": "t-fullstack-shell",
+        "name": "shell",
+        "cwd": "~/Documents/Git/example",
+        "startupCommands": [],
+        "frame": [
+          0.6,
+          0.5,
+          0.4,
+          0.5
+        ],
+        "z": 3,
+        "openOnRestore": false,
+        "environment": "local"
+      }
+    ]
+  }
+}

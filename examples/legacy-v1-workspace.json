@@ -1,0 +1,28 @@
+{
+  "name": "fullstack",
+  "layout": {
+    "type": "split",
+    "orientation": "horizontal",
+    "sizes": [0.6, 0.4],
+    "children": [
+      {
+        "type": "split",
+        "orientation": "vertical",
+        "sizes": [0.5, 0.5],
+        "children": [
+          { "type": "pane", "title": "api", "cwd": "~/Documents/Git/example/api", "command": "go run ./cmd/api" },
+          { "type": "pane", "title": "web", "cwd": "~/Documents/Git/example/web", "command": "npm run dev" }
+        ]
+      },
+      {
+        "type": "split",
+        "orientation": "vertical",
+        "sizes": [0.3, 0.7],
+        "children": [
+          { "type": "pane", "title": "db", "cwd": "~/Documents/Git/example", "command": "docker compose up postgres" },
+          { "type": "pane", "title": "shell", "cwd": "~/Documents/Git/example" }
+        ]
+      }
+    ]
+  }
+}
