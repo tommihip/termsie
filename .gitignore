@@ -31,6 +31,12 @@ playground.xcworkspace
 
 .build/
 
+# Build output: the compiled .app does not belong in the repository.
+build/
+
+# macOS
+.DS_Store
+
 # CocoaPods
 #
 # We recommend against adding the Pods directory to your .gitignore. However
