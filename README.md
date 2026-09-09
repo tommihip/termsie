@@ -52,11 +52,22 @@ overrides, and a config file that reloads the moment you save it.
 ## Requirements
 
 - macOS 14 or later (developed on macOS 26)
-- Xcode command line tools with Swift 5.9+
+- Xcode command line tools with Swift 5.9+, to build from source
 
 ## Install
 
-There is no prebuilt release yet, so build it from source. It takes about a minute.
+Download the signed, notarised app from [termsie.com](https://termsie.com), or:
+
+```bash
+brew install --cask tommihip/tap/termsie
+```
+
+Both give you a universal build that runs on Apple silicon and Intel, and open
+with an ordinary double click.
+
+### From source
+
+Takes about a minute.
 
 ```bash
 git clone https://github.com/tommihip/termsie.git
@@ -376,7 +387,9 @@ Termsie is young and moving quickly. It is used daily by its author, but it has 
 many hands yet, so expect rough edges and occasional breaking changes to the config format before
 1.0. Bug reports with a crash log or the steps that produced the problem are extremely welcome.
 
-There is no prebuilt release and no notarised binary yet.
+Releases are universal, signed with a Developer ID and notarised by Apple, so a download
+opens without a Gatekeeper detour. `scripts/release.sh` builds, signs, notarises and
+publishes one.
 
 ## Contributing
 
