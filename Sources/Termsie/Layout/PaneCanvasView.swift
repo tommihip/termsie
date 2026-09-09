@@ -22,6 +22,7 @@ final class PaneCanvasView: NSView {
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { false }
 
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
@@ -41,12 +42,58 @@ final class PaneCanvasView: NSView {
         bounds.fill()
         guard let message = emptyMessage, panes.isEmpty else { return }
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 13),
+            .font: UIFonts.system(size: 13),
             .foregroundColor: NSColor.hex(colors.headerText),
         ]
         let s = NSAttributedString(string: message, attributes: attrs)
         let size = s.size()
         s.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2))
+    }
+
+    // MARK: Cursor
+    //
+    // Cursor rects, the usual mechanism, are resolved per view without regard to what is drawn on
+    // top, so with terminals that overlap they let a background terminal claim the pointer over the
+    // header of the one in front. They are disabled window-wide; `SidebarContainerView` owns the
+    // pointer and asks this for canvas points. `hitTest` then gives the same answer that click
+    // handling already gives.
+
+    /// The pointer shape for a canvas point.
+    ///
+    /// `hitTest` walks subviews front to back, so the terminal actually visible at that point is
+    /// the one consulted, and its chrome wins over anything drawn behind it.
+    func cursor(at point: NSPoint) -> NSCursor {
+        // Walk up from the deepest view, because a hit inside a terminal usually lands on one of
+        // SwiftTerm's own subviews (the caret, the scroller) rather than the terminal itself.
+        var view = hitTestSubviews(point)
+        while let current = view {
+            if current is TermsieTerminalView { return .iBeam }
+            if current is NSTextView { return .iBeam }
+            if let field = current as? NSTextField, field.isEditable { return .iBeam }
+            if let pane = current as? TerminalPane {
+                return pane.cursor(at: pane.convert(point, from: self))
+            }
+            view = current.superview
+        }
+        return .arrow
+    }
+
+    /// The terminal visible at a canvas point, or nil for bare canvas.
+    func topmostPane(at point: NSPoint) -> TerminalPane? {
+        var view: NSView? = hitTestSubviews(point)
+        while let current = view, !(current is TerminalPane) { view = current.superview }
+        return view as? TerminalPane
+    }
+
+    /// The deepest view at a point given in *this* view's coordinates.
+    ///
+    /// `NSView.hitTest` takes a point in the receiver's **superview** coordinates, so it is asked
+    /// of each subview in turn instead. Reversed, because subviews run back to front.
+    private func hitTestSubviews(_ point: NSPoint) -> NSView? {
+        for subview in subviews.reversed() {
+            if let hit = subview.hitTest(point) { return hit }
+        }
+        return nil
     }
 
     // MARK: Membership
@@ -79,7 +126,6 @@ final class PaneCanvasView: NSView {
         pane.zIndex = nextZ
         nextZ += 1
         reorderZ()
-        window?.invalidateCursorRects(for: pane)
     }
 
     func sendToBack(_ pane: TerminalPane) {

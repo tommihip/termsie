@@ -54,7 +54,7 @@ final class SidebarFooterView: NSView {
         plus.stroke()
 
         let label = NSAttributedString(string: "New Terminal", attributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: tint,
+            .font: UIFonts.system(size: 11, weight: .medium), .foregroundColor: tint,
         ])
         label.draw(at: NSPoint(x: x + 14, y: midY - label.size().height / 2))
     }

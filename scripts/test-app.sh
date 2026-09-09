@@ -229,6 +229,63 @@ if [[ -n "${sizes[1]:-}" && "${sizes[1]}" == "${sizes[2]:-}" ]]; then
   ok "toggling it takes effect immediately (${sizes[1]})"
 else bad "toggle had no effect (${sizes[1]:-none} -> ${sizes[2]:-none})"; fi
 
+print "\n== the terminal in front owns the pointer where terminals overlap"
+# The front terminal's header is placed over the back terminal's text area *and* over its bottom
+# resize edge — the two places the pointer used to fall through to the terminal behind.
+fix=$ROOT/cursor; mkdir -p $fix/termsie/workspaces
+python3 - <<'JSON' > $fix/termsie/workspaces/overlap.json
+import json
+print(json.dumps({"version":2,"name":"overlap","layout":{"version":2,"terminals":[
+ {"id":"t-back","name":"back","frame":[0.05,0.05,0.7,0.6],"z":0},
+ {"id":"t-front","name":"front","frame":[0.25,0.6125,0.6,0.35],"z":1}]}}))
+JSON
+probe="cursorAt:665x505,cursorAt:665x518,cursorAt:665x560,cursorAt:520x560,cursorAt:665x200,cursorAt:415x518,cursorAt:270x100,cursorAt:264x400"
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --workspace overlap --snapshot $fix/shot.png --quit \
+      --actions "wait,wait,pane:2,wait,frames,$probe" 2>&1)
+# Confirm the fixture really is the overlapping arrangement before trusting the probes.
+check "the front terminal sits where expected" "$(print -r -- "$out" | grep 'frame: #2' | grep 'frame={{253, 490}, {610, 280}}')"
+cursor_at() { print -r -- "$out" | sed -nE "s/.*cursor: at=$1 shape=([a-zA-Z]+) terminal=([0-9]+).*/\1 \2/p" }
+check "header over the terminal behind is not a text cursor" "$([[ "$(cursor_at '665,505')" == "arrow 2" ]] && echo yes)"
+check "header over the other's resize edge is not a resize cursor" "$([[ "$(cursor_at '665,518')" == "arrow 2" ]] && echo yes)"
+check "the front terminal's own text is a text cursor"       "$([[ "$(cursor_at '665,560')" == "iBeam 2" ]] && echo yes)"
+check "the front terminal's own edge resizes"                "$([[ "$(cursor_at '520,560')" == "resizeLeftRight 2" ]] && echo yes)"
+check "the terminal behind still owns what it shows"         "$([[ "$(cursor_at '665,200')" == "iBeam 1" ]] && echo yes)"
+check "its uncovered edge still resizes"                     "$([[ "$(cursor_at '415,518')" == "resizeUpDown 1" ]] && echo yes)"
+check "bare canvas is a plain arrow"                         "$([[ "$(cursor_at '270,100')" == "arrow 0" ]] && echo yes)"
+check "the sidebar divider still resizes"                    "$([[ "$(cursor_at '264,400')" == "resizeLeftRight 0" ]] && echo yes)"
+
+print "\n== the sidebar survives heavy redrawing"
+# Guards a crash that took ~15% of runs: NSFont.monospacedSystemFont is declared non-null but
+# intermittently returned nil, and Swift carried that nil into CoreText, which aborted the process
+# while measuring a sidebar label. Fonts are resolved once through UIFonts now.
+if grep -rn 'NSFont\.systemFont\|NSFont\.monospacedSystemFont\|NSFont\.monospacedDigitSystemFont' \
+     ../Sources/Termsie 2>/dev/null | grep -v 'UIFonts.swift' | grep -v 'FontCatalog.swift' > /dev/null 2>&1 ||
+   grep -rn 'NSFont\.systemFont\|NSFont\.monospacedSystemFont\|NSFont\.monospacedDigitSystemFont' \
+     Sources/Termsie 2>/dev/null | grep -v 'UIFonts.swift' | grep -v 'FontCatalog.swift' > /dev/null 2>&1; then
+  bad "drawing code calls a system-font factory directly instead of going through UIFonts"
+else
+  ok "drawing code resolves fonts through UIFonts"
+fi
+
+fix=$ROOT/redraw; mkdir -p $fix/termsie/workspaces
+python3 - <<'JSON' > $fix/termsie/workspaces/redraw.json
+import json, os
+proj = os.path.expanduser('~')
+terms = [{"id": f"t-redraw-{i}", "name": f"terminal-with-a-fairly-long-name-{i}", "cwd": proj,
+          "environment": ["production","staging","development",None][i % 4],
+          "frame": [0.02 + (i % 4) * 0.2, 0.02 + (i // 4) * 0.3, 0.24, 0.28],
+          "z": i, "openOnRestore": i % 3 != 2}
+         for i in range(12)]
+print(json.dumps({"version":2,"name":"redraw","layout":{"version":2,"terminals":terms}}))
+JSON
+churn="wait,wait,resizeWindow:700x500,wait,resizeWindow:1400x900,wait,pane:3,pane:7,pane:11,wait,closeTerminal:4,wait,openTerminal:4,wait,tileGrid,wait,cascade,wait"
+redraw_crashes=0
+for i in 1 2 3 4 5 6; do
+  XDG_CONFIG_HOME=$fix "$BIN" --workspace redraw --snapshot $fix/shot.png --actions "$churn" --quit > $fix/run.log 2>&1 || redraw_crashes=$((redraw_crashes+1))
+done
+if (( redraw_crashes == 0 )); then ok "12 terminals, repeated resize and relayout: no crash in 6 runs"
+else bad "$redraw_crashes of 6 redraw runs crashed"; fi
+
 print "\n== the settings window opens"
 fix=$ROOT/settings2; mkdir -p $fix
 out=$(run $fix "wait,openSettings,wait,openEnvironmentSettings,wait" --cwd $HOME)

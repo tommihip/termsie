@@ -20,7 +20,7 @@ enum BadgeDrawing {
     static func drawIndexPill(_ number: Int, at origin: NSPoint, active: Bool,
                               colors: TermsieConfig.Colors) -> NSRect {
         let text = NSAttributedString(string: "\(number)", attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold),
+            .font: UIFonts.monospacedDigit(size: 10, weight: .bold),
             .foregroundColor: active ? NSColor.white : NSColor.hex(colors.headerText),
         ])
         let size = text.size()
@@ -36,7 +36,7 @@ enum BadgeDrawing {
     static func drawLabel(_ text: String, rightEdge: CGFloat, midY: CGFloat,
                           color: NSColor, filled: Bool) -> NSRect {
         let s = NSAttributedString(string: text, attributes: [
-            .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+            .font: UIFonts.system(size: 10, weight: .semibold),
             .foregroundColor: filled ? NSColor.black : color,
         ])
         let size = s.size()
@@ -103,6 +103,10 @@ enum BadgeDrawing {
         guard maxWidth > 4, !string.isEmpty else { return 0 }
         let style = NSMutableParagraphStyle()
         style.lineBreakMode = .byTruncatingTail
+        // Fonts now come from UIFonts, which validates them, so this should never fire. It stays
+        // as a backstop because the failure mode it prevents is a hard crash deep inside CoreText,
+        // a long way from anything that would point back here.
+        guard UIFonts.isUsable(font) else { return 0 }
         let s = NSAttributedString(string: string, attributes: [
             .font: font, .foregroundColor: color, .paragraphStyle: style,
         ])

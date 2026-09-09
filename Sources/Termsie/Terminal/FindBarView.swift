@@ -25,12 +25,12 @@ final class FindBarView: NSView, NSTextFieldDelegate {
 
         field.placeholderString = "Find"
         field.delegate = self
-        field.font = NSFont.systemFont(ofSize: 12)
+        field.font = UIFonts.system(size: 12)
         field.bezelStyle = .roundedBezel
         field.focusRingType = .none
         addSubview(field)
 
-        countLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        countLabel.font = UIFonts.monospacedDigit(size: 11, weight: .regular)
         countLabel.textColor = .secondaryLabelColor
         countLabel.alignment = .right
         addSubview(countLabel)
@@ -40,7 +40,7 @@ final class FindBarView: NSView, NSTextFieldDelegate {
             b.setButtonType(.momentaryPushIn)
             b.target = self
             b.action = sel
-            b.font = NSFont.systemFont(ofSize: 12)
+            b.font = UIFonts.system(size: 12)
             addSubview(b)
         }
         applyColors()

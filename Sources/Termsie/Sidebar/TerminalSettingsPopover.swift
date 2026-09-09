@@ -45,7 +45,7 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
         func label(_ text: String) {
             y -= 16
             let l = NSTextField(labelWithString: text)
-            l.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+            l.font = UIFonts.system(size: 11, weight: .semibold)
             l.textColor = .secondaryLabelColor
             l.frame = NSRect(x: pad, y: y, width: width, height: 16)
             root.addSubview(l)
@@ -125,7 +125,7 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
         root.addSubview(choose)
         y -= 16
         cwdWarning.frame = NSRect(x: pad, y: y, width: width, height: 14)
-        cwdWarning.font = NSFont.systemFont(ofSize: 10)
+        cwdWarning.font = UIFonts.system(size: 10)
         cwdWarning.textColor = NSColor.hex(ConfigStore.shared.config.colors.bell)
         root.addSubview(cwdWarning)
         y -= 8
@@ -135,7 +135,7 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
         let scroll = NSScrollView(frame: NSRect(x: pad, y: y, width: width, height: 92))
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
-        commandsView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        commandsView.font = UIFonts.monospaced(size: 11, weight: .regular)
         commandsView.isRichText = false
         commandsView.isAutomaticQuoteSubstitutionEnabled = false
         commandsView.autoresizingMask = [.width]

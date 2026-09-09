@@ -50,7 +50,6 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         didSet {
             header.isHidden = !showsHeader
             needsLayout = true
-            window?.invalidateCursorRects(for: self)
         }
     }
     var index: Int = 0 { didSet { header.index = index } }
@@ -459,7 +458,6 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         // frame, which over a Metal layer is a per-frame offscreen pass.
         layer?.shadowPath = CGPath(roundedRect: contentFrame, cornerWidth: radius,
                                    cornerHeight: radius, transform: nil)
-        window?.invalidateCursorRects(for: self)
     }
 
     override func viewDidMoveToWindow() {
@@ -477,13 +475,11 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func resetCursorRects() {
-        let b = PaneChrome.border
-        guard !isCollapsed, bounds.width > 2 * b, bounds.height > 2 * b else { return }
-        addCursorRect(NSRect(x: 0, y: 0, width: b, height: bounds.height), cursor: .resizeLeftRight)
-        addCursorRect(NSRect(x: bounds.maxX - b, y: 0, width: b, height: bounds.height), cursor: .resizeLeftRight)
-        addCursorRect(NSRect(x: 0, y: 0, width: bounds.width, height: b), cursor: .resizeUpDown)
-        addCursorRect(NSRect(x: 0, y: bounds.maxY - b, width: bounds.width, height: b), cursor: .resizeUpDown)
+    /// The cursor for a point inside this terminal, in the pane's own coordinates.
+    /// Overlap between terminals is already resolved by the caller.
+    func cursor(at point: NSPoint) -> NSCursor {
+        if !isCollapsed, let zone = PaneChrome.zone(at: point, in: bounds) { return zone.cursor }
+        return .arrow
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -707,6 +703,6 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
 }
 
 enum AppInfo {
-    static let version = "0.2.0"
+    static let version = "0.5.0"
     static let name = "Termsie"
 }

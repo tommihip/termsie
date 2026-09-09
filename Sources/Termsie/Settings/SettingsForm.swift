@@ -18,7 +18,7 @@ final class SettingsForm: NSView {
     func section(_ title: String) {
         if !boundChecks.isEmpty { cursorY += 10 }
         let label = NSTextField(labelWithString: title)
-        label.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        label.font = UIFonts.system(size: 11, weight: .semibold)
         label.textColor = .secondaryLabelColor
         label.frame = NSRect(x: margin, y: cursorY, width: bounds.width - 2 * margin, height: 16)
         label.autoresizingMask = [.width]
@@ -44,7 +44,7 @@ final class SettingsForm: NSView {
     /// Explanatory text under the preceding control.
     func hint(_ text: String) {
         let label = NSTextField(wrappingLabelWithString: text)
-        label.font = NSFont.systemFont(ofSize: 11)
+        label.font = UIFonts.system(size: 11)
         label.textColor = .tertiaryLabelColor
         let width = bounds.width - 2 * margin - 20
         label.frame = NSRect(x: margin + 20, y: cursorY + 1, width: width, height: 0)

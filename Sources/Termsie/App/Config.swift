@@ -247,7 +247,7 @@ struct TermsieConfig: Codable, Equatable {
         let points = min(max(size ?? font.size, Self.minFontSize), Self.maxFontSize)
         return NSFont(name: name, size: points)
             ?? NSFont(name: font.family, size: points)
-            ?? NSFont.monospacedSystemFont(ofSize: points, weight: .regular)
+            ?? UIFonts.monospaced(size: points, weight: .regular)
     }
 
     var resolvedShell: String {

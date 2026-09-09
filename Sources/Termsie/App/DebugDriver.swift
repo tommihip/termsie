@@ -17,12 +17,9 @@ enum DebugDriver {
             DispatchQueue.main.asyncAfter(deadline: .now() + t) { perform(action) }
             t += 0.7
         }
+        let shouldQuit = args.contains("--quit")
         DispatchQueue.main.asyncAfter(deadline: .now() + t + 1.5) {
-            snapshot(to: path)
-            if args.contains("--quit") {
-                for c in AppDelegate.shared.controllers { c.panes.forEach { $0.terminate() } }
-                exit(0)
-            }
+            finish(path: path, quit: shouldQuit)
         }
     }
 
@@ -52,6 +49,12 @@ enum DebugDriver {
             let parts = action.dropFirst(7).split(separator: "x").compactMap { Double($0) }
             if parts.count == 2 {
                 controller.simulateDrag(pane, zone: .bottomRight, delta: NSPoint(x: parts[0], y: parts[1]))
+            }
+        } else if action.hasPrefix("cursorAt:"), let controller {
+            let parts = action.dropFirst(9).split(separator: "x").compactMap { Double($0) }
+            if parts.count == 2 {
+                let result = controller.cursorDescription(at: NSPoint(x: parts[0], y: parts[1]))
+                NSLog("DebugDriver cursor: at=\(Int(parts[0])),\(Int(parts[1])) shape=\(result.cursor) terminal=\(result.pane)")
             }
         } else if action == "dumpWorkspace", let controller {
             NSLog("DebugDriver workspace: name=[\(controller.workspaceName ?? "-")] modified=\(controller.isWorkspaceModified)")
@@ -170,27 +173,50 @@ enum DebugDriver {
         }
     }
 
-    private static func snapshot(to path: String) {
+    /// Captures the window and, when asked, quits once the file is on disk.
+    private static func finish(path: String, quit: Bool) {
         guard let window = NSApp.keyWindow ?? AppDelegate.shared.controllers.first?.window else {
             NSLog("DebugDriver: no window to snapshot")
+            if quit { exit(1) }
             return
         }
+        logState(window)
+
+        // The capture is asynchronous, so the process must not be torn down until it lands.
+        // A watchdog covers the case where the permission prompt stalls it indefinitely.
+        var finished = false
+        let done: (Int32) -> Void = { code in
+            guard !finished else { return }
+            finished = true
+            if quit {
+                for controller in AppDelegate.shared.controllers {
+                    controller.panes.forEach { $0.terminate() }
+                }
+                exit(code)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
+            guard !finished else { return }
+            NSLog("DebugDriver: capture timed out")
+            done(1)
+        }
+        Task { @MainActor in
+            do {
+                let size = try await WindowCapture.writePNG(of: window, to: path)
+                NSLog("DebugDriver: wrote \(path) (\(size.width)x\(size.height))")
+                done(0)
+            } catch {
+                NSLog("DebugDriver: capture failed — \(error.localizedDescription)")
+                done(1)
+            }
+        }
+    }
+
+    private static func logState(_ window: NSWindow) {
         if let controller = window.windowController as? TerminalWindowController {
             let pane = controller.activePane
             NSLog("DebugDriver: metal=\(pane?.terminalView.isUsingMetalRenderer ?? false) panes=\(controller.panes.count) defs=\(controller.registry.count) open=\(controller.registry.openCount) sidebar=\(controller.sidebarVisible ? String(Int(controller.sidebarWidth)) : "hidden") opaque=\(window.isOpaque) blur=\(controller.backdropCount) termAlpha=\(String(format: "%.2f", pane?.terminalView.backgroundOpacity ?? 1)) title=\(window.title)")
         }
-        let id = CGWindowID(window.windowNumber)
-        guard let image = CGWindowListCreateImage(.null, .optionIncludingWindow, id, [.boundsIgnoreFraming, .bestResolution]) else {
-            NSLog("DebugDriver: CGWindowListCreateImage failed")
-            return
-        }
-        let rep = NSBitmapImageRep(cgImage: image)
-        guard let data = rep.representation(using: .png, properties: [:]) else { return }
-        do {
-            try data.write(to: URL(fileURLWithPath: path))
-            NSLog("DebugDriver: wrote \(path) (\(image.width)x\(image.height))")
-        } catch {
-            NSLog("DebugDriver: \(error)")
-        }
     }
+
 }

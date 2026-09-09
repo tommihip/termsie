@@ -11,6 +11,7 @@ final class SidebarContainerView: NSView {
     private let backdrop = NSVisualEffectView()
     /// The sidebar gets its own material so it reads as a panel rather than a hole.
     private let sidebarBackdrop = NSVisualEffectView()
+    private var cursorTracking: NSTrackingArea?
 
     static let minWidth: CGFloat = 160
     static let maxWidth: CGFloat = 420
@@ -22,7 +23,6 @@ final class SidebarContainerView: NSView {
             sidebar.isHidden = !sidebarVisible
             needsLayout = true
             layoutSubtreeIfNeeded()
-            window?.invalidateCursorRects(for: self)
         }
     }
 
@@ -99,9 +99,31 @@ final class SidebarContainerView: NSView {
                width: Self.dividerGrab + Self.dividerWidth, height: bounds.height)
     }
 
-    override func resetCursorRects() {
-        guard sidebarVisible else { return }
-        addCursorRect(dividerRect, cursor: .resizeLeftRight)
+    // Cursor rects are disabled for this window (see PaneCanvasView), because they cannot tell
+    // which of two overlapping terminals is actually in front. This view is the single owner of
+    // the pointer shape instead, so every region has a definite answer.
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = cursorTracking { removeTrackingArea(existing) }
+        let area = NSTrackingArea(rect: bounds,
+                                  options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        cursorTracking = area
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        cursor(at: convert(event.locationInWindow, from: nil)).set()
+    }
+
+    /// The pointer shape for a point in the window's content.
+    func cursor(at point: NSPoint) -> NSCursor {
+        if sidebarVisible, dividerRect.contains(point) { return .resizeLeftRight }
+        if let canvas = canvasHost as? PaneCanvasView, canvasHost.frame.contains(point) {
+            return canvas.cursor(at: canvas.convert(point, from: self))
+        }
+        return .arrow
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -118,7 +140,6 @@ final class SidebarContainerView: NSView {
             self.sidebarWidth = startWidth + (q.x - startX)
             if ev.type == .leftMouseUp { stop.pointee = true }
         }
-        window.invalidateCursorRects(for: self)
         onGeometryChanged?()
     }
 }

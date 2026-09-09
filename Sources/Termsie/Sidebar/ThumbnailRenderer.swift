@@ -139,7 +139,7 @@ enum ThumbnailRenderer {
         var lines: [String] = []
         if let cwd = definition.cwd, !cwd.isEmpty { lines.append(ProcessInspector.abbreviateHome(cwd)) }
         lines.append(contentsOf: definition.startupCommands.prefix(3))
-        let font = NSFont.monospacedSystemFont(ofSize: 4.5, weight: .regular)
+        let font = UIFonts.monospaced(size: 4.5, weight: .regular)
         var y = size.height - 8
         for line in lines.prefix(4) {
             let s = NSAttributedString(string: line, attributes: [

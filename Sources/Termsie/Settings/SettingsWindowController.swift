@@ -106,7 +106,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
 
     private func label(_ text: String, at y: CGFloat, in view: NSView, width: CGFloat = 200) -> NSTextField {
         let l = NSTextField(labelWithString: text)
-        l.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        l.font = UIFonts.system(size: 11, weight: .semibold)
         l.textColor = .secondaryLabelColor
         l.frame = NSRect(x: 16, y: y, width: width, height: 16)
         view.addSubview(l)
@@ -115,7 +115,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
 
     private func hint(_ text: String, at y: CGFloat, in view: NSView, width: CGFloat) {
         let l = NSTextField(wrappingLabelWithString: text)
-        l.font = NSFont.systemFont(ofSize: 11)
+        l.font = UIFonts.system(size: 11)
         l.textColor = .tertiaryLabelColor
         l.frame = NSRect(x: 16, y: y, width: width, height: 32)
         view.addSubview(l)
@@ -221,7 +221,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
         v.addSubview(removeButton)
 
         let orderHint = NSTextField(labelWithString: "Drag to reorder")
-        orderHint.font = NSFont.systemFont(ofSize: 10)
+        orderHint.font = UIFonts.system(size: 10)
         orderHint.textColor = .tertiaryLabelColor
         orderHint.frame = NSRect(x: 82, y: 20, width: 130, height: 16)
         v.addSubview(orderHint)
@@ -231,7 +231,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
         let x: CGFloat = 232
         func sectionLabel(_ text: String) {
             let l = NSTextField(labelWithString: text)
-            l.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+            l.font = UIFonts.system(size: 11, weight: .semibold)
             l.textColor = .secondaryLabelColor
             l.frame = NSRect(x: x, y: y, width: 260, height: 16)
             v.addSubview(l)
@@ -269,7 +269,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
         v.addSubview(strengthSlider)
         editorFields.append(strengthSlider)
         strengthLabel.frame = NSRect(x: x + 224, y: y - 2, width: 48, height: 20)
-        strengthLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        strengthLabel.font = UIFonts.monospacedDigit(size: 11, weight: .regular)
         strengthLabel.textColor = .secondaryLabelColor
         v.addSubview(strengthLabel)
         editorFields.append(strengthLabel)
@@ -470,7 +470,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
         swatch.color = env.tint.flatMap { NSColor(hex: $0) }
         cell.addSubview(swatch)
         let text = NSTextField(labelWithString: env.label.isEmpty ? env.id : env.label)
-        text.font = NSFont.systemFont(ofSize: 12)
+        text.font = UIFonts.system(size: 12)
         text.frame = NSRect(x: 26, y: 6, width: 158, height: 18)
         text.lineBreakMode = .byTruncatingTail
         cell.addSubview(text)

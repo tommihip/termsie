@@ -41,11 +41,17 @@ final class TerminalRowView: NSTableRowView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
+        guard let graphics = NSGraphicsContext.current else { return }
+        let context = graphics.cgContext
+        // Save and restore the *same* context, and pair them with `defer`. The previous version
+        // read `NSGraphicsContext.current` separately for the save and the restore, which is only
+        // balanced if that property hands back the same object both times.
+        context.saveGState()
+        defer { context.restoreGState() }
+
         let colors = ConfigStore.shared.config.colors
         // A closed terminal reads as dimmed rather than absent.
-        let alpha: CGFloat = isOpen ? 1.0 : 0.55
-        NSGraphicsContext.current?.saveGraphicsState()
-        NSGraphicsContext.current?.cgContext.setAlpha(alpha)
+        context.setAlpha(isOpen ? 1.0 : 0.55)
 
         let x = Self.margin
         let midY = bounds.midY
@@ -55,14 +61,14 @@ final class TerminalRowView: NSTableRowView {
                                    isOpen: isOpen, isBusy: isBusy, colors: colors)
 
         let thumb = thumbnailRect
-        if let image = thumbnail, let ctx = NSGraphicsContext.current?.cgContext {
-            ctx.saveGState()
+        if let image = thumbnail {
+            context.saveGState()
             // The row is flipped; images draw bottom-up, so flip back for this one draw.
-            ctx.translateBy(x: 0, y: thumb.maxY)
-            ctx.scaleBy(x: 1, y: -1)
-            ctx.interpolationQuality = .none
-            ctx.draw(image, in: NSRect(x: thumb.minX, y: 0, width: thumb.width, height: thumb.height))
-            ctx.restoreGState()
+            context.translateBy(x: 0, y: thumb.maxY)
+            context.scaleBy(x: 1, y: -1)
+            context.interpolationQuality = .none
+            context.draw(image, in: NSRect(x: thumb.minX, y: 0, width: thumb.width, height: thumb.height))
+            context.restoreGState()
         } else {
             NSColor.hex(colors.background).setFill()
             thumb.fill()
@@ -77,13 +83,15 @@ final class TerminalRowView: NSTableRowView {
         // narrow sidebar still shows a readable name.
         let textX = thumb.maxX + 8
         let textWidth = max(0, bounds.width - Self.margin - textX)
+        let titleFont = UIFonts.system(size: 11, weight: isActivePane ? .semibold : .medium)
+        let subFont = UIFonts.monospaced(size: 9.5, weight: .regular)
         BadgeDrawing.drawTruncated(title,
-                                   font: NSFont.systemFont(ofSize: 11, weight: isActivePane ? .semibold : .medium),
+                                   font: titleFont,
                                    color: NSColor.hex(isActivePane ? colors.headerActiveText : colors.headerText),
                                    at: NSPoint(x: textX, y: thumb.minY + 2), maxWidth: textWidth)
         if !subtitle.isEmpty {
             BadgeDrawing.drawTruncated(subtitle,
-                                       font: NSFont.monospacedSystemFont(ofSize: 9.5, weight: .regular),
+                                       font: subFont,
                                        color: NSColor.hex(colors.headerText),
                                        at: NSPoint(x: textX, y: thumb.minY + 17), maxWidth: textWidth)
         }
@@ -95,6 +103,5 @@ final class TerminalRowView: NSTableRowView {
             _ = BadgeDrawing.drawLabel(label.uppercased(), rightEdge: right,
                                        midY: thumb.maxY - 8, color: tint, filled: true)
         }
-        NSGraphicsContext.current?.restoreGraphicsState()
     }
 }

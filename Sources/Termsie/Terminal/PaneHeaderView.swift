@@ -95,12 +95,12 @@ final class PaneHeaderView: NSView {
                                             color: tint, filled: true).minX - 6
         }
 
-        let titleFont = NSFont.systemFont(ofSize: 11, weight: isActive ? .semibold : .medium)
+        let titleFont = UIFonts.system(size: 11, weight: isActive ? .semibold : .medium)
         let used = BadgeDrawing.drawTruncated(title, font: titleFont, color: textColor,
                                               at: NSPoint(x: x, y: midY - 7), maxWidth: max(0, rightX - x))
         x += used + 10
         if !subtitle.isEmpty, rightX - x > 30 {
-            BadgeDrawing.drawTruncated(subtitle, font: NSFont.monospacedSystemFont(ofSize: 10.5, weight: .regular),
+            BadgeDrawing.drawTruncated(subtitle, font: UIFonts.monospaced(size: 10.5, weight: .regular),
                                        color: dimColor, at: NSPoint(x: x, y: midY - 7), maxWidth: rightX - x)
         }
     }

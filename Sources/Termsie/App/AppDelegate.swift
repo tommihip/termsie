@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private(set) var controllers: [TerminalWindowController] = []
     private let launch = LaunchArguments.parse()
+    private var mouseMonitor: Any?
 
     // MARK: NSApplicationDelegate
 
@@ -54,8 +55,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             newWindow(cwd: launch.cwd)
         }
         NSApp.activate(ignoringOtherApps: true)
+        startCursorTracking()
         pruneStaleTerminalState()
         DebugDriver.startIfRequested()
+    }
+
+    /// One monitor for the whole app, rather than a tracking area per window.
+    ///
+    /// Cursor rects are disabled for terminal windows (they cannot tell which of two overlapping
+    /// terminals is in front), so something has to set the pointer as it moves. A `.cursorUpdate`
+    /// tracking area is not enough: it fires on entering and leaving an area, not on movement
+    /// within one. SwiftTerm hits the same limitation and works around it the same way, noting
+    /// that `.mouseMoved` tracking areas are unreliable on macOS 26.
+    private func startCursorTracking() {
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { event in
+            if let controller = event.window?.windowController as? TerminalWindowController {
+                controller.updateCursor(atWindowPoint: event.locationInWindow)
+            }
+            return event
+        }
     }
 
     private func emitShim(to path: String) {

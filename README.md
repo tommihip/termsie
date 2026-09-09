@@ -235,6 +235,35 @@ open -a Termsie --args --workspace fullstack
 open -a Termsie --args --cwd ~/src/example
 ```
 
+## Fonts in the interface
+
+Interface text goes through `UIFonts`, which resolves each face once and keeps it.
+
+That is not micro-optimisation. `NSFont.systemFont(ofSize:weight:)` and its monospaced siblings are
+declared non-null, so Swift types them non-optional, but under repeated calls from a draw loop they
+have been observed returning nil. Swift then stores a nil in a reference it believes cannot be nil,
+nothing complains at the call site, and the process dies much later inside CoreText while measuring
+a string. Resolving each face once removes both the repeated lookups and the window in which they
+can fail, and every resolved font is checked before being cached, with a concrete fallback.
+
+## How the pointer knows which terminal is in front
+
+Cursor rectangles, AppKit's usual way to set the pointer, are registered per view and resolved
+without regard to what is drawn on top. With terminals that overlap, that let a terminal behind
+claim the pointer over the header of the terminal in front: the header looked solid, clicked
+correctly, but showed a text cursor, or a resize cursor if the terminal behind had an edge there.
+
+Termsie turns cursor rectangles off for its windows and sets the pointer from a single place
+instead, resolving overlap with `hitTest` — the same mechanism that already decided which terminal
+a click belongs to, which is why clicking always worked. There is one owner for the whole window,
+so every region has a definite answer: the sidebar divider, bare canvas, a terminal's chrome, its
+header, and its text all resolve explicitly.
+
+Movement is fed by a single app-wide mouse-moved monitor rather than a tracking area. A
+`cursorUpdate` tracking area only fires on entering and leaving its area, so one covering the whole
+window would set the pointer once at the edge and then leave it stuck; and `.mouseMoved` tracking
+areas are unreliable on macOS 26, which SwiftTerm works around the same way.
+
 ## How the terminal list stays live
 
 Thumbnails are drawn from each terminal's character buffer, not captured from the screen. That
@@ -273,7 +302,7 @@ If you deliberately run `setopt share_history`, Termsie leaves your history alon
 
 ```
 Sources/Termsie/
-  App/        AppDelegate, MainMenu, Config (JSON + file watcher), DebugDriver
+  App/        AppDelegate, MainMenu, Config (JSON + file watcher), DebugDriver, WindowCapture
   Model/      TerminalDefinition (the saved terminal), TerminalRegistry (definitions ↔ live panes)
   Window/     TerminalWindowController — lifecycle, focus, menus, workspace and session plumbing
   Layout/     PaneCanvasView (floating terminals), PaneChrome (hit zones), Arrange (tile/cascade),
@@ -304,3 +333,10 @@ configuration.
 `Termsie --snapshot out.png --actions newTerminalAction,type:ls\n,tileGrid --quit` drives the app
 from a script and saves a PNG of the window. `--emit-shim <dir>` writes the generated shell files
 without launching the interface.
+
+The snapshot goes through ScreenCaptureKit, because it is the only way to read the Metal-rendered
+terminals: view-snapshot APIs return blank where a Metal layer is, and `CGWindowListCreateImage` is
+deprecated on macOS 14 and unavailable on newer SDKs. That means `--snapshot` needs Screen
+Recording permission for Termsie, and it captures the window alone, so a behind-window blur shows
+as flat rather than frosted. Nothing else in the app uses screen capture, so running Termsie
+normally never asks for that permission.

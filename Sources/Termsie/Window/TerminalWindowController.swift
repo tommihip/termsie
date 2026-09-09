@@ -49,6 +49,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         window.backgroundColor = config.blurBackground ? .clear : NSColor.hex(config.colors.background)
         window.isReleasedWhenClosed = false
         window.collectionBehavior.insert(.fullScreenPrimary)
+        // Cursor rects cannot express "the terminal in front owns this point", which is exactly
+        // what overlapping terminals need. SidebarContainerView drives the pointer instead, fed by
+        // the app-wide mouse-moved monitor in AppDelegate.
+        window.disableCursorRects()
+        window.acceptsMouseMovedEvents = true
         super.init(window: window)
 
         sidebar = TerminalSidebarView(registry: registry)
@@ -430,6 +435,40 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     func newWorkspaceForTesting() {
         resetToEmptyWorkspace()
     }
+
+    /// Sets the pointer for a point in *window* coordinates. Driven by the app's mouse-moved
+    /// monitor, because a `.cursorUpdate` tracking area only fires on entering and leaving the
+    /// area — it would set the pointer once at the window edge and then leave it stuck.
+    func updateCursor(atWindowPoint point: NSPoint) {
+        let local = container.convert(point, from: nil)
+        // Outside the content view is the title bar and the window's own resize edges, where the
+        // system owns the pointer.
+        guard container.bounds.contains(local) else { return }
+        container.cursor(at: local).set()
+    }
+
+    /// What the pointer would become at a point in window content coordinates, and which
+    /// terminal owns that point. Used to test occlusion without moving the real cursor.
+    func cursorDescription(at point: NSPoint) -> (cursor: String, pane: Int) {
+        let cursor = container.cursor(at: point)
+        let name: String
+        switch cursor {
+        case NSCursor.iBeam: name = "iBeam"
+        case NSCursor.resizeLeftRight: name = "resizeLeftRight"
+        case NSCursor.resizeUpDown: name = "resizeUpDown"
+        case NSCursor.arrow: name = "arrow"
+        default: name = "other"
+        }
+        var index = 0
+        if let canvas = canvasView, canvasHostFrame.contains(point),
+           let pane = canvas.topmostPane(at: canvas.convert(point, from: container)) {
+            index = pane.index
+        }
+        return (name, index)
+    }
+
+    private var canvasView: PaneCanvasView? { canvas }
+    private var canvasHostFrame: NSRect { canvas.frame }
 
     /// The name shown in a terminal's header and in its sidebar row. They must agree.
     func displayedNames(for id: String) -> (header: String?, row: String) {
