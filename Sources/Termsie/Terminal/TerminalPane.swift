@@ -76,8 +76,10 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     init(config: TermsieConfig, definition: TerminalDefinition, isReopen: Bool) {
         definitionID = definition.id
         let options = TerminalOptions(cursorStyle: config.terminalCursorStyle, scrollback: config.scrollback)
-        terminalView = TermsieTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 300),
-                                           font: config.nsFont, options: options)
+        terminalView = TermsieTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 400, height: 300),
+            font: config.resolvedFont(family: definition.fontFamily, size: definition.fontSize),
+            options: options)
         super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         initialDirectory = definition.cwd
         startupCommands = definition.commands(isReopen: isReopen)
@@ -279,6 +281,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         terminalView.bellStyle = config.terminalBellStyle
         showsHeader = config.showPaneHeaders
         header.showsTrafficLights = config.trafficLights
+        applyFont()
         updateBackground()
         layer?.backgroundColor = NSColor.clear.cgColor
         content.layer?.backgroundColor = NSColor.clear.cgColor
@@ -311,8 +314,23 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     }
 
     func setFont(_ font: NSFont) {
+        guard terminalView.font != font else { return }
         terminalView.font = font
         thumbnailDirty = true
+    }
+
+    /// Re-reads the font from this terminal's definition, so a change to either the global setting
+    /// or this terminal's override lands in one place.
+    func applyFont() {
+        let config = ConfigStore.shared.config
+        let def = controller?.registry.definition(definitionID)
+        setFont(config.resolvedFont(family: def?.fontFamily, size: def?.fontSize))
+    }
+
+    /// The point size actually in use, whether inherited or overridden.
+    var effectiveFontSize: Double {
+        let def = controller?.registry.definition(definitionID)
+        return def?.fontSize ?? ConfigStore.shared.config.font.size
     }
 
     /// Assigning an alpha-bearing background is how SwiftTerm expresses translucency: only the

@@ -10,9 +10,11 @@ is, where it runs, and whether it is open right now.
   are typing in stays crisp.
 - **Real window chrome** on every terminal: rounded corners, a soft shadow, and red/yellow/green
   buttons that close it, roll it up to its header, and maximize it.
-- **Environments.** Mark a terminal as production, staging, development or local and it takes on
-  that colour: its background, header, badge and list row. A production shell never looks like a
-  local one.
+- **Environments.** Mark a terminal as production, staging, development or anything you define and
+  it takes on that colour: its background, header, badge and list row. A production shell never
+  looks like a local one. Add, recolour and reorder environments in Settings.
+- **Fonts** are a global setting that any single terminal can override, family and size
+  independently.
 - **Free-floating terminals.** Drag any terminal by its header, resize from any edge or corner,
   overlap them however you like. Edges snap to the window and to each other; hold ⌘ while dragging
   to suppress snapping.
@@ -68,9 +70,10 @@ make icon           # regenerate Resources/AppIcon.icns
 | Broadcast input to all terminals | ⌥⌘I |
 | Clear scrollback | ⌘K |
 | Find / next / previous | ⌘F / ⌘G / ⇧⌘G |
-| Bigger / smaller / default text | ⌘= / ⌘- / ⌘0 |
+| Bigger / smaller text (focused terminal) | ⌘= / ⌘- |
+| Use the global font again | ⌘0 |
 | Save workspace / open workspace file | ⇧⌘S / ⇧⌘O |
-| Open settings file | ⌘, |
+| Settings | ⌘, |
 
 Mouse: drag a header to move a terminal, drag its edges or corners to resize, double-click the
 header to maximize, right-click it for a menu including its environment. The three buttons at the
@@ -81,6 +84,28 @@ at the bottom to add one.
 
 Closing a terminal keeps it in the list. Deleting removes it for good. The window closes only when
 its last terminal is deleted, so a window of saved-but-closed terminals is a normal state.
+
+## Settings
+
+**⌘,** opens Settings, which has two tabs.
+
+**Font** sets the global font every terminal starts from. Only fixed-pitch families are listed,
+because a terminal draws on a character grid and a proportional font would misalign every column.
+
+**Environments** is where you add your own. Each has a name, a colour, and a tint strength, with a
+live preview beside it. Drag to reorder, and use the **+** and **−** buttons to add and remove.
+Changes are written to `config.json` immediately and every open terminal repaints.
+
+Removing an environment does not rewrite the terminals using it; they simply lose their tint, and
+re-adding one with the same id brings the colour back. An environment keeps its internal id when
+you rename it, so terminals stay attached.
+
+### Fonts, globally and per terminal
+
+The global font applies to every terminal that has not overridden it, so changing it in Settings
+moves them all at once. A single terminal can override the family, the size, or just one of the
+two, from its own settings in the list. ⌘= and ⌘- resize the focused terminal and save that as its
+override; ⌘0 clears the override so it follows the global font again.
 
 ## Configuration
 
@@ -146,6 +171,10 @@ Every key is optional.
 Colors live under `colors`, including `sidebarBackground`, `sidebarSelection`, and the 16-entry
 `ansi` palette.
 
+Settings writes this file, so it is reformatted with sorted keys when you change something in the
+UI. Any keys Termsie does not recognise are dropped on that write. Editing the file by hand still
+works either way, and the app reloads it as soon as you save.
+
 ## Workspaces
 
 Workspaces live in `~/.config/termsie/workspaces/<name>.json` and appear under
@@ -160,7 +189,7 @@ running right now.
   "layout": {
     "version": 2,
     "terminals": [
-      { "id": "t-fullstack-api", "name": "api", "cwd": "~/src/api",
+      { "id": "t-fullstack-api", "name": "api", "cwd": "~/src/api", "environment": "production",
         "startupCommands": ["go run ./cmd/api"], "frame": [0, 0, 0.6, 0.5], "z": 0 },
       { "id": "t-fullstack-py", "name": "worker", "cwd": "~/src/worker",
         "startupCommands": ["source .venv/bin/activate", "python worker.py"],
@@ -173,7 +202,8 @@ running right now.
 `frame` is `[x, y, width, height]` as fractions of the window, measured from the top left, so a
 workspace saved on a large display still opens sensibly on a laptop. `z` is the stacking order.
 `openOnRestore: false` keeps a terminal in the list without starting it. `environment` names one of
-the configured environments and tints the terminal. See `examples/workspace.json`.
+the configured environments and tints the terminal. `fontFamily` and `fontSize` override the global
+font for that terminal alone; omit either to inherit it. See `examples/workspace.json`.
 
 Older workspace and session files that used the nested split-tree format still open; their panes
 become floating terminals in the same positions. `examples/legacy-v1-workspace.json` is one.
@@ -233,6 +263,7 @@ Sources/Termsie/
   Sidebar/    TerminalSidebarView, TerminalRowView, SidebarFooterView, ThumbnailRenderer,
               ThumbnailSource, TerminalSettingsPopover, SidebarContainerView, BadgeDrawing
   Session/    WorkspaceStore (v2 format), LegacyMigration (v1 split trees → terminals)
+  Settings/   SettingsWindowController (global font + environment manager), FontCatalog
 ```
 
 ## Tests
@@ -246,8 +277,8 @@ Sources/Termsie/
 environment to be identical apart from the history variables, then proves history isolation over
 real pseudo-terminals with `expect`. `test-app.sh` drives the real app and checks thumbnail
 correctness and cost, session migration, terminal lifecycle, startup commands, dragging and
-snapping, translucency, collapse, environments, and that a terminal's name is the same in its
-header and its list row. Both use throwaway fixture directories and never touch your real
+snapping, translucency, collapse, environments and their management, font inheritance and
+overrides, and that a terminal's name is the same in its header and its list row. Both use throwaway fixture directories and never touch your real
 configuration.
 
 `Termsie --snapshot out.png --actions newTerminalAction,type:ls\n,tileGrid --quit` drives the app

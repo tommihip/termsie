@@ -118,7 +118,7 @@ check "opaque config disables the blur"      "$(print -r -- "$out" | grep 'blur=
 
 print "\n== one name, shown in both the header and the list"
 fix=$ROOT/names; mkdir -p $fix
-out=$(run $fix "newTerminalAction,wait,rename:1xdatabase,wait,dumpNames" --cwd $HOME)
+out=$(run $fix "newTerminalAction,wait,rename:1|database,wait,dumpNames" --cwd $HOME)
 line=$(print -r -- "$out" | grep 'DebugDriver name' | head -1)
 check "renaming reaches the header"          "$(print -r -- "$line" | grep 'header=\[database\]')"
 check "renaming reaches the list row"        "$(print -r -- "$line" | grep 'row=\[database\]')"
@@ -141,8 +141,34 @@ else bad "height changed across collapse (${heights[1]} -> ${heights[3]})"; fi
 
 print "\n== environments tint a terminal and persist"
 fix=$ROOT/envs; mkdir -p $fix
-out=$(run $fix "wait,setEnv:1xproduction,wait,dumpTerminals" --cwd $HOME)
+out=$(run $fix "wait,setEnv:1|production,wait,dumpTerminals" --cwd $HOME)
 check "environment saved on the definition"  "$(print -r -- "$out" | grep '"environment":"production"')"
+
+print "\n== fonts: a global setting each terminal may override"
+fix=$ROOT/fonts; mkdir -p $fix
+out=$(run $fix "newTerminalAction,wait,setFont:1|Monaco|18,wait,setGlobalFont:Andale Mono|15,wait,dumpFonts" --cwd $HOME)
+check "global font applied to the plain terminal"   "$(print -r -- "$out" | grep 'actual=\[Andale Mono 15\]')"
+check "overridden terminal keeps its own font"      "$(print -r -- "$out" | grep 'override=\[Monaco 18\] actual=\[Monaco 18\]')"
+out=$(run $fix "wait,increaseFontSize,increaseFontSize,wait,dumpFonts" --cwd $HOME)
+check "text size writes a size-only override"       "$(print -r -- "$out" | grep -E 'override=\[- 1[0-9]\]')"
+out=$(run $fix "wait,setFont:1|Monaco|18,wait,resetFontSize,wait,dumpFonts" --cwd $HOME)
+check "reset returns a terminal to the global font" "$(print -r -- "$out" | grep 'override=\[- -\]')"
+
+print "\n== environments can be added, edited and removed"
+fix=$ROOT/envmgr; mkdir -p $fix
+out=$(run $fix "wait,addEnvironment:QA Sandbox|#98c379|0.3,wait,removeEnvironment:development,wait,dumpEnvironments,setEnv:1|qa-sandbox,wait,dumpTerminals" --cwd $HOME)
+check "a custom environment is added"      "$(print -r -- "$out" | grep '\"id\":\"qa-sandbox\"')"
+check "its tint and strength are kept"     "$(print -r -- "$out" | grep '\"strength\":0.3')"
+check "a built-in one can be removed"      "$([[ -z "$(print -r -- "$out" | grep 'DebugDriver environments' | grep '\"id\":\"development\"')" ]] && echo yes)"
+check "a terminal can use the custom one"  "$(print -r -- "$out" | grep '\"environment\":\"qa-sandbox\"')"
+if [[ -f $fix/termsie/config.json ]] && grep -q 'qa-sandbox' $fix/termsie/config.json; then
+  ok "the change is written to config.json"
+else bad "config.json was not updated"; fi
+
+print "\n== the settings window opens"
+fix=$ROOT/settings2; mkdir -p $fix
+out=$(run $fix "wait,openSettings,wait,openEnvironmentSettings,wait" --cwd $HOME)
+check "app survived opening settings" "$(print -r -- "$out" | grep 'DebugDriver: wrote')"
 
 print "\n== the settings editor opens"
 fix=$ROOT/settings; mkdir -p $fix

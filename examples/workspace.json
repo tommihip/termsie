@@ -51,7 +51,9 @@
           0.5
         ],
         "z": 2,
-        "environment": "staging"
+        "environment": "staging",
+        "fontFamily": "Monaco",
+        "fontSize": 12
       },
       {
         "id": "t-fullstack-shell",
@@ -65,8 +67,7 @@
           0.5
         ],
         "z": 3,
-        "openOnRestore": false,
-        "environment": "local"
+        "openOnRestore": false
       }
     ]
   }

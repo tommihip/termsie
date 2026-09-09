@@ -53,6 +53,54 @@ enum DebugDriver {
             if parts.count == 2 {
                 controller.simulateDrag(pane, zone: .bottomRight, delta: NSPoint(x: parts[0], y: parts[1]))
             }
+        } else if action == "dumpFonts", let controller {
+            let global = ConfigStore.shared.config.font
+            NSLog("DebugDriver globalFont: \(global.family) \(global.size)")
+            for id in controller.registry.order {
+                let def = controller.registry.definition(id)
+                let pane = controller.registry.pane(for: id)
+                let font = pane?.terminalView.font
+                NSLog("DebugDriver font: id=\(id) override=[\(def?.fontFamily ?? "-") \(def?.fontSize.map { String(format: "%g", $0) } ?? "-")] actual=[\(font?.familyName ?? "-") \(font.map { String(format: "%g", $0.pointSize) } ?? "-")]")
+            }
+        } else if action.hasPrefix("setFont:"), let controller {
+            // setFont:<n>|<family>|<size>; an empty family or size clears that override.
+            let parts = action.dropFirst(8).split(separator: "|", omittingEmptySubsequences: false)
+            if parts.count == 3, let n = Int(parts[0]), let id = controller.registry.id(at: n - 1) {
+                controller.registry.mutate(id) {
+                    $0.fontFamily = parts[1].isEmpty ? nil : String(parts[1])
+                    $0.fontSize = Double(parts[2])
+                }
+            }
+        } else if action.hasPrefix("setGlobalFont:") {
+            let parts = action.dropFirst(14).split(separator: "|", omittingEmptySubsequences: false)
+            if parts.count == 2 {
+                ConfigStore.shared.update {
+                    if !parts[0].isEmpty { $0.font.family = String(parts[0]) }
+                    if let size = Double(parts[1]) { $0.font.size = size }
+                }
+            }
+        } else if action == "dumpEnvironments" {
+            let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
+            if let data = try? enc.encode(ConfigStore.shared.config.environments) {
+                NSLog("DebugDriver environments: \(String(decoding: data, as: UTF8.self))")
+            }
+        } else if action.hasPrefix("addEnvironment:") {
+            // addEnvironment:<label>|<tint>|<strength>
+            let parts = action.dropFirst(15).split(separator: "|", omittingEmptySubsequences: false)
+            if parts.count == 3 {
+                ConfigStore.shared.update {
+                    let id = String(parts[0]).lowercased().replacingOccurrences(of: " ", with: "-")
+                    $0.environments.append(TermsieConfig.EnvironmentStyle(
+                        id: id, label: String(parts[0]),
+                        tint: parts[1].isEmpty ? nil : String(parts[1]),
+                        strength: Double(parts[2]) ?? 0.22))
+                }
+            }
+        } else if action.hasPrefix("removeEnvironment:") {
+            let target = String(action.dropFirst(18))
+            ConfigStore.shared.update { $0.environments.removeAll { $0.id == target } }
+        } else if action == "openSettings" {
+            SettingsWindowController.shared.show()
         } else if action == "dumpNames", let controller {
             for id in controller.registry.order {
                 let n = controller.displayedNames(for: id)
@@ -61,12 +109,12 @@ enum DebugDriver {
         } else if action == "readout", let controller {
             NSLog("DebugDriver readout: \(controller.activePane?.showsResizeReadout == true ? "visible" : "cleared")")
         } else if action.hasPrefix("rename:"), let controller {
-            let parts = action.dropFirst(7).split(separator: "x", maxSplits: 1)
+            let parts = action.dropFirst(7).split(separator: "|", maxSplits: 1)
             if parts.count == 2, let n = Int(parts[0]), let id = controller.registry.id(at: n - 1) {
                 controller.registry.mutate(id) { $0.name = String(parts[1]) }
             }
         } else if action.hasPrefix("setEnv:"), let controller {
-            let parts = action.dropFirst(7).split(separator: "x", maxSplits: 1)
+            let parts = action.dropFirst(7).split(separator: "|", maxSplits: 1)
             if parts.count == 2, let n = Int(parts[0]), let id = controller.registry.id(at: n - 1) {
                 controller.setEnvironment(String(parts[1]), for: id)
             }

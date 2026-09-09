@@ -182,7 +182,6 @@ struct TermsieConfig: Codable, Equatable {
     var trafficLights = true
     /// Selectable environments. The first is the untinted default.
     var environments: [EnvironmentStyle] = [
-        EnvironmentStyle(id: "local", label: "Local", tint: nil),
         EnvironmentStyle(id: "development", label: "Development", tint: "#61afef"),
         EnvironmentStyle(id: "staging", label: "Staging", tint: "#e5c07b"),
         EnvironmentStyle(id: "production", label: "Production", tint: "#e06c75", strength: 0.26),
@@ -219,7 +218,7 @@ struct TermsieConfig: Codable, Equatable {
         blurBackground = try c.decodeIfPresent(Bool.self, forKey: .blurBackground) ?? blurBackground
         cornerRadius = try c.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? cornerRadius
         trafficLights = try c.decodeIfPresent(Bool.self, forKey: .trafficLights) ?? trafficLights
-        if let envs = try c.decodeIfPresent([EnvironmentStyle].self, forKey: .environments), !envs.isEmpty {
+        if let envs = try c.decodeIfPresent([EnvironmentStyle].self, forKey: .environments) {
             environments = envs
         }
         shellIntegration = try c.decodeIfPresent(String.self, forKey: .shellIntegration) ?? shellIntegration
@@ -232,9 +231,19 @@ struct TermsieConfig: Codable, Equatable {
 
     // MARK: Resolved values
 
-    var nsFont: NSFont {
-        NSFont(name: font.family, size: font.size)
-            ?? NSFont.monospacedSystemFont(ofSize: font.size, weight: .regular)
+    var nsFont: NSFont { resolvedFont(family: nil, size: nil) }
+
+    static let minFontSize: Double = 6
+    static let maxFontSize: Double = 72
+
+    /// The font for a terminal, given its optional overrides. A nil field inherits the global one,
+    /// which is what makes changing the global font move every terminal that has not opted out.
+    func resolvedFont(family: String?, size: Double?) -> NSFont {
+        let name = (family?.isEmpty == false) ? family! : font.family
+        let points = min(max(size ?? font.size, Self.minFontSize), Self.maxFontSize)
+        return NSFont(name: name, size: points)
+            ?? NSFont(name: font.family, size: points)
+            ?? NSFont.monospacedSystemFont(ofSize: points, weight: .regular)
     }
 
     var resolvedShell: String {
@@ -365,10 +374,33 @@ final class ConfigStore {
     }
 
     private static func writeDefault(to url: URL) {
+        write(TermsieConfig(), to: url)
+    }
+
+    /// Applies a change and writes config.json back.
+    ///
+    /// The file watcher will see our own write and call `reload()`, which compares the decoded
+    /// result against what we already hold and does nothing — so this cannot loop.
+    func update(_ transform: (inout TermsieConfig) -> Void) {
+        var updated = config
+        transform(&updated)
+        guard updated != config else { return }
+        config = updated
+        ConfigStore.write(updated, to: configURL)
+        NotificationCenter.default.post(name: .termsieConfigChanged, object: self)
+    }
+
+    @discardableResult
+    static func write(_ config: TermsieConfig, to url: URL) -> Bool {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
-        if let data = try? enc.encode(TermsieConfig()) {
-            try? data.write(to: url)
+        guard let data = try? enc.encode(config) else { return false }
+        do {
+            try data.write(to: url, options: .atomic)
+            return true
+        } catch {
+            NSLog("Termsie: could not write config.json: \(error)")
+            return false
         }
     }
 

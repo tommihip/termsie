@@ -14,6 +14,9 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
     private let cwdWarning = NSTextField(labelWithString: "")
     private let commandsView = NSTextView()
     private let environmentPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let fontPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let fontSizeField = NSTextField()
+    private let fontSizeStepper = NSStepper()
     private let reopenCheck = NSButton(checkboxWithTitle: "Run commands when reopening", target: nil, action: nil)
     private let historyCheck = NSButton(checkboxWithTitle: "Own command history", target: nil, action: nil)
     private let applyButton = NSButton(title: "Run Commands Now", target: nil, action: nil)
@@ -34,7 +37,7 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 404))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 466))
         let pad: CGFloat = 14
         let width = root.bounds.width - 2 * pad
         var y = root.bounds.height - pad
@@ -62,6 +65,9 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
         environmentPopUp.frame = NSRect(x: pad, y: y, width: width, height: 24)
         environmentPopUp.target = self
         environmentPopUp.action = #selector(environmentChanged)
+        let none = NSMenuItem(title: "None", action: nil, keyEquivalent: "")
+        none.representedObject = ""
+        environmentPopUp.menu?.addItem(none)
         for style in ConfigStore.shared.config.environments {
             let item = NSMenuItem(title: style.label, action: nil, keyEquivalent: "")
             item.representedObject = style.id
@@ -75,6 +81,36 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
             environmentPopUp.menu?.addItem(item)
         }
         root.addSubview(environmentPopUp)
+        y -= 10
+
+        // Font: empty fields mean "inherit", which is why the placeholders show the global values.
+        label("Font")
+        y -= 24
+        fontPopUp.frame = NSRect(x: pad, y: y, width: width - 74, height: 24)
+        fontPopUp.target = self
+        fontPopUp.action = #selector(fontChanged)
+        let globalFamily = ConfigStore.shared.config.font.family
+        let inherit = NSMenuItem(title: "Global (\(globalFamily))", action: nil, keyEquivalent: "")
+        inherit.representedObject = ""
+        fontPopUp.menu?.addItem(inherit)
+        fontPopUp.menu?.addItem(.separator())
+        for family in FontCatalog.families(including: definitionFamily) {
+            fontPopUp.menu?.addItem(FontCatalog.menuItem(for: family))
+        }
+        root.addSubview(fontPopUp)
+        fontSizeField.frame = NSRect(x: pad + width - 70, y: y + 1, width: 44, height: 22)
+        fontSizeField.alignment = .right
+        fontSizeField.placeholderString = String(format: "%g", ConfigStore.shared.config.font.size)
+        fontSizeField.delegate = self
+        root.addSubview(fontSizeField)
+        fontSizeStepper.frame = NSRect(x: pad + width - 22, y: y, width: 19, height: 24)
+        fontSizeStepper.minValue = TermsieConfig.minFontSize
+        fontSizeStepper.maxValue = TermsieConfig.maxFontSize
+        fontSizeStepper.increment = 1
+        fontSizeStepper.valueWraps = false
+        fontSizeStepper.target = self
+        fontSizeStepper.action = #selector(fontSizeStepped)
+        root.addSubview(fontSizeStepper)
         y -= 10
 
         label("Working folder")
@@ -133,8 +169,16 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
         cwdField.stringValue = def.cwd ?? ""
         commandsView.string = def.startupCommands.joined(separator: "\n")
         reopenCheck.state = def.runCommandsOnReopen ? .on : .off
+        // Offset by one for the leading "None" item.
         let envIndex = ConfigStore.shared.config.environments.firstIndex { $0.id == (def.environment ?? "") }
-        environmentPopUp.selectItem(at: envIndex ?? 0)
+        environmentPopUp.selectItem(at: envIndex.map { $0 + 1 } ?? 0)
+        if let family = def.fontFamily, !family.isEmpty {
+            fontPopUp.selectItem(withTitle: family)
+        } else {
+            fontPopUp.selectItem(at: 0)
+        }
+        fontSizeField.stringValue = def.fontSize.map { String(format: "%g", $0) } ?? ""
+        fontSizeStepper.doubleValue = def.fontSize ?? ConfigStore.shared.config.font.size
         historyCheck.state = def.isolatedHistory ? .on : .off
         applyButton.isEnabled = registry?.isOpen(definitionID) ?? false
         validateFolder()
@@ -166,13 +210,40 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
     }
 
     func controlTextDidChange(_ obj: Notification) {
-        if (obj.object as? NSTextField) === cwdField { validateFolder() }
+        let field = obj.object as? NSTextField
+        if field === cwdField { validateFolder() }
+        if field === fontSizeField {
+            if let size = enteredFontSize { fontSizeStepper.doubleValue = size }
+            commit()
+        }
     }
 
     func controlTextDidEndEditing(_ obj: Notification) { commit() }
 
     private var selectedEnvironment: String? {
-        environmentPopUp.selectedItem?.representedObject as? String
+        let value = environmentPopUp.selectedItem?.representedObject as? String
+        return (value?.isEmpty ?? true) ? nil : value
+    }
+
+    private var definitionFamily: String? { registry?.definition(definitionID)?.fontFamily }
+
+    private var selectedFontFamily: String? {
+        let value = fontPopUp.selectedItem?.representedObject as? String
+        return (value?.isEmpty ?? true) ? nil : value
+    }
+
+    /// An empty size field means "inherit the global size".
+    private var enteredFontSize: Double? {
+        let text = fontSizeField.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty, let value = Double(text) else { return nil }
+        return min(max(value, TermsieConfig.minFontSize), TermsieConfig.maxFontSize)
+    }
+
+    @objc private func fontChanged() { commit() }
+
+    @objc private func fontSizeStepped() {
+        fontSizeField.stringValue = String(format: "%g", fontSizeStepper.doubleValue)
+        commit()
     }
 
     @objc private func environmentChanged() {
@@ -211,6 +282,8 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
             def.runCommandsOnReopen = reopenCheck.state == .on
             def.isolatedHistory = historyCheck.state == .on
             def.environment = selectedEnvironment
+            def.fontFamily = selectedFontFamily
+            def.fontSize = enteredFontSize
         }
     }
 

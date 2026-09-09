@@ -18,6 +18,9 @@ struct TerminalDefinition: Codable, Equatable {
     var runCommandsOnReopen: Bool = true
     /// Whether this terminal gets its own shell history file.
     var isolatedHistory: Bool = true
+    /// Font overrides. Either may be nil to inherit the corresponding global setting.
+    var fontFamily: String?
+    var fontSize: Double?
     /// Which configured environment this terminal belongs to, tinting its background.
     /// `nil` or an unknown id means the untinted default.
     var environment: String?
@@ -58,6 +61,8 @@ struct TerminalDefinition: Codable, Equatable {
         runCommandsOnReopen = try c.decodeIfPresent(Bool.self, forKey: .runCommandsOnReopen) ?? true
         isolatedHistory = try c.decodeIfPresent(Bool.self, forKey: .isolatedHistory) ?? true
         environment = try c.decodeIfPresent(String.self, forKey: .environment)
+        fontFamily = try c.decodeIfPresent(String.self, forKey: .fontFamily)
+        fontSize = try c.decodeIfPresent(Double.self, forKey: .fontSize)
         z = try c.decodeIfPresent(Int.self, forKey: .z) ?? 0
         openOnRestore = try c.decodeIfPresent(Bool.self, forKey: .openOnRestore) ?? true
         if let f = try c.decodeIfPresent([Double].self, forKey: .frame), f.count == 4,
@@ -88,6 +93,9 @@ struct TerminalDefinition: Codable, Equatable {
         }
         return "shell"
     }
+
+    /// True when this terminal uses the global font rather than its own.
+    var usesGlobalFont: Bool { fontFamily == nil && fontSize == nil }
 
     /// Commands to send on open, honoring `runCommandsOnReopen`.
     func commands(isReopen: Bool) -> [String] {

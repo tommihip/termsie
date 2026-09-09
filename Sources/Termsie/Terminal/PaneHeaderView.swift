@@ -135,6 +135,14 @@ final class PaneHeaderView: NSView {
 
         // Environment submenu, so switching a terminal to production is two clicks from its header.
         let envMenu = NSMenu()
+        let noneItem = NSMenuItem(title: "None",
+                                  action: #selector(TerminalWindowController.setEnvironmentFromMenu(_:)),
+                                  keyEquivalent: "")
+        noneItem.representedObject = ""
+        noneItem.target = controller
+        noneItem.state = (controller.registry.definition(pane.definitionID)?.environment ?? "").isEmpty ? .on : .off
+        envMenu.addItem(noneItem)
+        envMenu.addItem(.separator())
         for style in ConfigStore.shared.config.environments {
             let item = NSMenuItem(title: style.label,
                                   action: #selector(TerminalWindowController.setEnvironmentFromMenu(_:)),
@@ -144,6 +152,11 @@ final class PaneHeaderView: NSView {
             item.state = (controller.registry.definition(pane.definitionID)?.environment ?? "") == style.id ? .on : .off
             envMenu.addItem(item)
         }
+        envMenu.addItem(.separator())
+        let manage = NSMenuItem(title: "Manage Environments…",
+                                action: #selector(AppDelegate.openEnvironmentSettings(_:)), keyEquivalent: "")
+        manage.target = AppDelegate.shared
+        envMenu.addItem(manage)
         let envItem = NSMenuItem(title: "Environment", action: nil, keyEquivalent: "")
         envItem.submenu = envMenu
         menu.addItem(envItem)

@@ -12,7 +12,6 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     private(set) weak var activePane: TerminalPane?
     private(set) var broadcastEnabled = false
-    private var fontSizeDelta: CGFloat = 0
     private var headersVisible: Bool
     private var configObserver: NSObjectProtocol?
     private var isClosing = false
@@ -109,7 +108,6 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         pane.controller = self
         pane.showsHeader = headersVisible
         pane.isBroadcasting = broadcastEnabled
-        if fontSizeDelta != 0 { pane.setFont(currentFont) }
         return pane
     }
 
@@ -348,15 +346,16 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     // MARK: Config / font
 
-    private var currentFont: NSFont {
-        let config = ConfigStore.shared.config
-        let size = max(6, CGFloat(config.font.size) + fontSizeDelta)
-        return NSFont(name: config.font.family, size: size) ?? NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+    private func applyFont() {
+        for pane in registry.livePanes { pane.applyFont() }
     }
 
-    private func applyFont() {
-        let font = currentFont
-        for pane in registry.livePanes { pane.setFont(font) }
+    /// Nudges the focused terminal's own size, recording it as an override so it survives a
+    /// relaunch. Without a terminal in focus this would have nothing to act on.
+    private func adjustFontSize(by delta: Double) {
+        guard let id = activePane?.definitionID, let pane = registry.pane(for: id) else { return }
+        let next = min(max(pane.effectiveFontSize + delta, TermsieConfig.minFontSize), TermsieConfig.maxFontSize)
+        registry.mutate(id) { $0.fontSize = next }
     }
 
     private func applyConfig() {
@@ -511,6 +510,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         if let pane = registry.pane(for: id), let def = registry.definition(id) {
             if pane.customTitle != def.name { pane.customTitle = def.name }
             pane.applyEnvironment()
+            pane.applyFont()
         }
         sidebar?.reloadRow(id)
     }
@@ -565,7 +565,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     @objc func toggleCollapse(_ sender: Any?) { activePane?.toggleCollapsed() }
     @objc func setEnvironmentFromMenu(_ sender: NSMenuItem) {
         guard let id = activePane?.definitionID else { return }
-        setEnvironment(sender.representedObject as? String, for: id)
+        let value = sender.representedObject as? String
+        setEnvironment((value?.isEmpty ?? true) ? nil : value, for: id)
     }
 
     /// Applies an environment to one terminal and repaints everything that shows it.
@@ -628,12 +629,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     @objc func showFind(_ sender: Any?) { activePane?.showFindBar() }
     @objc func findNext(_ sender: Any?) { activePane?.findNext() }
     @objc func findPrevious(_ sender: Any?) { activePane?.findPrevious() }
-    @objc func increaseFontSize(_ sender: Any?) { fontSizeDelta += 1; applyFont() }
-    @objc func decreaseFontSize(_ sender: Any?) {
-        fontSizeDelta = max(fontSizeDelta - 1, 6 - CGFloat(ConfigStore.shared.config.font.size))
-        applyFont()
+    @objc func increaseFontSize(_ sender: Any?) { adjustFontSize(by: 1) }
+    @objc func decreaseFontSize(_ sender: Any?) { adjustFontSize(by: -1) }
+    /// Drops this terminal's overrides so it follows the global font again.
+    @objc func resetFontSize(_ sender: Any?) {
+        guard let id = activePane?.definitionID else { return }
+        registry.mutate(id) { $0.fontFamily = nil; $0.fontSize = nil }
     }
-    @objc func resetFontSize(_ sender: Any?) { fontSizeDelta = 0; applyFont() }
     @objc func renameActivePane(_ sender: Any?) { renamePane(activePane) }
 
     @objc func saveWorkspace(_ sender: Any?) {
@@ -714,6 +716,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         case #selector(toggleSidebar(_:)):
             item.state = container.sidebarVisible ? .on : .off
             return true
+        case #selector(increaseFontSize(_:)), #selector(decreaseFontSize(_:)), #selector(resetFontSize(_:)):
+            return activePane != nil
         case #selector(closeActivePane(_:)), #selector(clearScrollback(_:)), #selector(showFind(_:)),
              #selector(renameActivePane(_:)), #selector(tilePaneLeft(_:)), #selector(tilePaneRight(_:)),
              #selector(tilePaneTop(_:)), #selector(tilePaneBottom(_:)), #selector(centerPane(_:)):

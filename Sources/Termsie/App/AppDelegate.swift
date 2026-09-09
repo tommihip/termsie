@@ -230,6 +230,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         newWindow(cwd: keyController?.activePane?.currentDirectory)
     }
 
+    @objc func openSettings(_ sender: Any?) {
+        SettingsWindowController.shared.show()
+    }
+
+    @objc func openEnvironmentSettings(_ sender: Any?) {
+        SettingsWindowController.shared.showEnvironments()
+    }
+
     @objc func openConfig(_ sender: Any?) {
         NSWorkspace.shared.open(ConfigStore.shared.configURL)
     }

@@ -303,6 +303,12 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
         }
         let envMenu = NSMenu()
         let current = registry.definition(id)?.environment ?? ""
+        let noneItem = NSMenuItem(title: "None", action: #selector(contextSetEnvironment(_:)), keyEquivalent: "")
+        noneItem.representedObject = [id, ""]
+        noneItem.target = self
+        noneItem.state = current.isEmpty ? .on : .off
+        envMenu.addItem(noneItem)
+        envMenu.addItem(.separator())
         for style in ConfigStore.shared.config.environments {
             let envItem = NSMenuItem(title: style.label, action: #selector(contextSetEnvironment(_:)),
                                      keyEquivalent: "")
@@ -311,6 +317,11 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
             envItem.state = current == style.id ? .on : .off
             envMenu.addItem(envItem)
         }
+        envMenu.addItem(.separator())
+        let manage = NSMenuItem(title: "Manage Environments…",
+                                action: #selector(AppDelegate.openEnvironmentSettings(_:)), keyEquivalent: "")
+        manage.target = AppDelegate.shared
+        envMenu.addItem(manage)
         let envParent = NSMenuItem(title: "Environment", action: nil, keyEquivalent: "")
         envParent.submenu = envMenu
         menu.addItem(envParent)
@@ -341,7 +352,7 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
     }
     @objc private func contextSetEnvironment(_ sender: Any?) {
         guard let pair = (sender as? NSMenuItem)?.representedObject as? [String], pair.count == 2 else { return }
-        delegate?.sidebarDidSetEnvironment(pair[1], for: pair[0])
+        delegate?.sidebarDidSetEnvironment(pair[1].isEmpty ? nil : pair[1], for: pair[0])
     }
 
     @objc private func contextReveal(_ sender: Any?) {
