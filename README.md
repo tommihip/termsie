@@ -14,7 +14,7 @@ an API, a bundler, a worker, a database shell, and somewhere a `tail -f`.
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-early-orange.svg)](#project-status)
 
-<img src="docs/hero.png" alt="Termsie with four terminals, colour-coded by environment" width="900">
+<img src="docs/demo.gif" alt="Four terminals floating in one Termsie window, each tinted by its environment, then tiled into a grid" width="900">
 
 </div>
 

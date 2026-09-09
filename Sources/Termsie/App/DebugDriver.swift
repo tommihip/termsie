@@ -1,26 +1,110 @@
 import AppKit
 
-/// Developer aid: `Termsie --snapshot out.png [--actions newTerminalAction,type:ls,tileGrid] [--quit]`
+/// Developer aid, in two modes.
+///
+/// `Termsie --snapshot out.png [--actions newTerminalAction,type:ls,tileGrid] [--quit]`
 /// performs menu actions on the key window, saves a PNG of it, and optionally exits.
 /// Useful for verifying rendering and layout from scripts.
+///
+/// `Termsie --record frames/ [--actions ...] [--fps 12] [--record-width 1000] [--step 0.7] [--tail 1.5] [--quit]`
+/// does the same but writes a numbered frame on a timer throughout, so a whole
+/// action sequence can be assembled into a video or GIF. Both go through
+/// ScreenCaptureKit and so need Screen Recording permission.
 enum DebugDriver {
     static func startIfRequested() {
         let args = CommandLine.arguments
-        guard let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count else { return }
-        let path = args[i + 1]
+        let snapshotPath = value(of: "--snapshot", in: args)
+        let recordDir = value(of: "--record", in: args)
+        guard snapshotPath != nil || recordDir != nil else { return }
+
         var actions: [String] = []
-        if let j = args.firstIndex(of: "--actions"), j + 1 < args.count {
-            actions = args[j + 1].split(separator: ",").map(String.init)
+        if let spec = value(of: "--actions", in: args) {
+            actions = spec.split(separator: ",").map(String.init)
         }
-        var t = 1.5
+
+        // How long each action is given before the next one fires. Recording wants
+        // this longer than the test suite does, so gestures read as deliberate.
+        let step = value(of: "--step", in: args).flatMap(Double.init) ?? 0.7
+        let tail = value(of: "--tail", in: args).flatMap(Double.init) ?? 1.5
+        let lead = 1.5
+
+        var t = lead
         for action in actions {
             DispatchQueue.main.asyncAfter(deadline: .now() + t) { perform(action) }
-            t += 0.7
+            t += step
         }
         let shouldQuit = args.contains("--quit")
-        DispatchQueue.main.asyncAfter(deadline: .now() + t + 1.5) {
-            finish(path: path, quit: shouldQuit)
+
+        if let dir = recordDir {
+            let fps = value(of: "--fps", in: args).flatMap(Double.init) ?? 12
+            let width = value(of: "--record-width", in: args).flatMap(Int.init) ?? 1000
+            startRecording(into: dir, fps: fps, width: width, duration: t + tail, quit: shouldQuit)
+            return
         }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + t + tail) {
+            finish(path: snapshotPath!, quit: shouldQuit)
+        }
+    }
+
+    private static func value(of flag: String, in args: [String]) -> String? {
+        guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
+        return args[i + 1]
+    }
+
+    /// Writes `frame-0000.jpg`, `frame-0001.jpg`, … into `dir` until `duration` elapses.
+    ///
+    /// Frames are captured one at a time and never concurrently: ScreenCaptureKit
+    /// screenshots take long enough that a fixed-rate timer would otherwise stack
+    /// requests up and drift. The result is close to `fps` rather than exactly it,
+    /// which is why the assembler reads the real frame count rather than assuming.
+    private static func startRecording(
+        into dir: String, fps: Double, width: Int, duration: TimeInterval, quit: Bool
+    ) {
+        let url = URL(fileURLWithPath: dir, isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+
+        let interval = 1.0 / max(fps, 1)
+        let start = Date()
+        let deadline = start.addingTimeInterval(duration)
+        var index = 0
+        // Elapsed seconds per frame. Capture is slower than the requested rate,
+        // so the assembler times playback from these rather than from `fps`.
+        var stamps: [TimeInterval] = []
+
+        func captureNext() {
+            guard Date() < deadline else {
+                let timing = stamps.map { String(format: "%.4f", $0) }.joined(separator: "\n")
+                try? timing.write(to: url.appendingPathComponent("timing.txt"),
+                                  atomically: true, encoding: .utf8)
+                NSLog("DebugDriver: recorded \(index) frames in \(String(format: "%.1f", Date().timeIntervalSince(start)))s to \(dir)")
+                if quit {
+                    for controller in AppDelegate.shared.controllers {
+                        controller.panes.forEach { $0.terminate() }
+                    }
+                    exit(0)
+                }
+                return
+            }
+            guard let window = NSApp.keyWindow ?? AppDelegate.shared.controllers.first?.window else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + interval) { captureNext() }
+                return
+            }
+            let path = url.appendingPathComponent(String(format: "frame-%04d.jpg", index)).path
+            index += 1
+            let started = Date()
+            stamps.append(started.timeIntervalSince(start))
+            Task { @MainActor in
+                do {
+                    _ = try await WindowCapture.writeJPEG(of: window, to: path, maxWidth: width)
+                } catch {
+                    NSLog("DebugDriver: frame capture failed — \(error.localizedDescription)")
+                }
+                let remaining = max(0, interval - Date().timeIntervalSince(started))
+                DispatchQueue.main.asyncAfter(deadline: .now() + remaining) { captureNext() }
+            }
+        }
+        captureNext()
     }
 
     private static func perform(_ action: String) {
