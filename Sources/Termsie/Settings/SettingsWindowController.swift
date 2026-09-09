@@ -9,6 +9,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
     static let shared = SettingsWindowController()
 
     private let tabs = NSTabView()
+    private let generalForm = SettingsForm()
+    private var configObserver: NSObjectProtocol?
 
     // Font tab
     private let fontPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -46,6 +48,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
         super.init(window: window)
         window.delegate = self
         buildUI()
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .termsieConfigChanged, object: nil, queue: .main) { [weak self] _ in
+                self?.generalForm.refresh()
+            }
+    }
+
+    deinit {
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -57,9 +67,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// Test hooks that drive the real controls.
+    @discardableResult
+    func clickGeneralSetting(_ title: String) -> Bool { generalForm.clickCheckbox(titled: title) }
+    func generalSettingState(_ title: String) -> Bool? { generalForm.checkboxState(titled: title) }
+
     func showEnvironments() {
         show()
-        tabs.selectTabViewItem(at: 1)
+        // By identifier, so adding a tab ahead of it cannot send this to the wrong place.
+        if let index = tabs.indexOfTabViewItem(withIdentifier: "environments") as Int?, index != NSNotFound {
+            tabs.selectTabViewItem(at: index)
+        }
     }
 
     // MARK: Build
@@ -69,6 +87,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
         tabs.frame = content.bounds.insetBy(dx: 12, dy: 12)
         tabs.autoresizingMask = [.width, .height]
         content.addSubview(tabs)
+
+        let generalTab = NSTabViewItem(identifier: "general")
+        generalTab.label = "General"
+        generalTab.view = buildGeneralTab()
+        tabs.addTabViewItem(generalTab)
 
         let fontTab = NSTabViewItem(identifier: "font")
         fontTab.label = "Font"
@@ -96,6 +119,29 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
         l.textColor = .tertiaryLabelColor
         l.frame = NSRect(x: 16, y: y, width: width, height: 32)
         view.addSubview(l)
+    }
+
+    /// Global behaviour that is not about a single terminal. New settings go here as one
+    /// `checkbox` call each.
+    private func buildGeneralTab() -> NSView {
+        generalForm.frame = NSRect(x: 0, y: 0, width: 520, height: 360)
+        generalForm.autoresizingMask = [.width, .height]
+
+        generalForm.section("Window")
+        generalForm.checkbox("Resize terminals with the window", \.resizeTerminalsWithWindow,
+                             hint: "Off keeps every terminal at its own size and position; they only slide back into view when the window becomes smaller than they are.")
+        generalForm.checkbox("Snap terminal resizing to character cells", \.snapToCells,
+                             hint: "Keeps a terminal a whole number of rows and columns while you drag its edge.")
+
+        generalForm.section("Starting up")
+        generalForm.checkbox("Reopen terminals from the last session", \.restoreSession)
+
+        generalForm.section("Terminals")
+        generalForm.checkbox("Show terminal headers", \.showPaneHeaders)
+        generalForm.checkbox("Show window buttons on each terminal", \.trafficLights)
+        generalForm.checkbox("Ask before closing a terminal that is running something",
+                             \.confirmClosingRunningProcess)
+        return generalForm
     }
 
     private func buildFontTab() -> NSView {
@@ -239,6 +285,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
     // MARK: Loading
 
     private func reloadAll() {
+        generalForm.refresh()
         reloadFontTab()
         table.reloadData()
         if table.selectedRow < 0, !environments.isEmpty {

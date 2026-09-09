@@ -27,7 +27,8 @@ is, where it runs, and whether it is open right now.
   it back.
 - **Every terminal has its own command history**, so pressing Up in one shows only what you typed
   there. This needs no changes to your dotfiles.
-- **Workspaces** save a whole window of terminals to a JSON file. **Session restore** brings back
+- **Workspaces** save a whole window of terminals to a JSON file, with the usual New, Save and
+  Save As, and a prompt before you discard unsaved changes. **Session restore** brings back
   your terminals on relaunch. Plus native tabs, input broadcast, scrollback search, and a
   hot-reloading config file.
 
@@ -72,7 +73,9 @@ make icon           # regenerate Resources/AppIcon.icns
 | Find / next / previous | ⌘F / ⌘G / ⇧⌘G |
 | Bigger / smaller text (focused terminal) | ⌘= / ⌘- |
 | Use the global font again | ⌘0 |
-| Save workspace / open workspace file | ⇧⌘S / ⇧⌘O |
+| New workspace | ⌥⌘N |
+| Save workspace / save as | ⌘S / ⇧⌘S |
+| Open workspace file | ⇧⌘O |
 | Settings | ⌘, |
 
 Mouse: drag a header to move a terminal, drag its edges or corners to resize, double-click the
@@ -87,7 +90,11 @@ its last terminal is deleted, so a window of saved-but-closed terminals is a nor
 
 ## Settings
 
-**⌘,** opens Settings, which has two tabs.
+**⌘,** opens Settings, which has three tabs.
+
+**General** holds the global behaviour switches: whether terminals resize along with the window,
+whether resizing snaps to whole character cells, whether the last session reopens on launch,
+whether terminals show headers and window buttons, and whether closing a busy terminal asks first.
 
 **Font** sets the global font every terminal starts from. Only fixed-pitch families are listed,
 because a terminal draws on a character grid and a proportional font would misalign every column.
@@ -126,6 +133,7 @@ Every key is optional.
   "closePaneOnExit": "clean",
   "confirmClosingRunningProcess": true,
   "restoreSession": true,
+  "resizeTerminalsWithWindow": true,
   "snapToCells": true,
   "opacity": 0.88,
   "activeOpacityBoost": 0.07,
@@ -157,6 +165,9 @@ Every key is optional.
 - `cursorStyle`: `block`, `bar`, `underline`, or the blinking variants `blinkBlock`, `blinkBar`,
   `blinkUnderline`.
 - `closePaneOnExit`: `always`, `clean` (only on exit status 0), or `never`.
+- `resizeTerminalsWithWindow` (also in Settings ▸ General): with `true` the terminals scale with
+  the window, keeping your arrangement proportional. With `false` they keep their exact size and position, and only slide
+  back into view far enough to stay reachable when the window gets smaller.
 - `snapToCells`: rounds a resize to whole character cells, so the emulator only reflows when the
   grid actually changes. Turn it off if a resize ever feels sticky.
 - `shellIntegration`: `"off"` disables the history and startup-command machinery entirely, and
@@ -177,10 +188,19 @@ works either way, and the app reloads it as soon as you save.
 
 ## Workspaces
 
-Workspaces live in `~/.config/termsie/workspaces/<name>.json` and appear under
-**Workspaces ▸ Open Workspace**. **Save Workspace…** writes the current tab's terminals with their
-folders, startup commands, and positions, and can optionally fold in whatever each terminal is
-running right now.
+A workspace is one tab's terminals: their folders, startup commands, environments, fonts and
+positions. Workspaces live in `~/.config/termsie/workspaces/<name>.json` and appear under
+**Workspaces ▸ Open Workspace**.
+
+**New Workspace** (⌥⌘N) clears the tab back to a single empty terminal. **Save Workspace** (⌘S)
+writes to the workspace you have open, asking for a name the first time; **Save Workspace As…**
+(⇧⌘S) always asks, and can optionally fold in whatever each terminal is running right now.
+
+The window subtitle shows which workspace you are in and whether it has unsaved changes. Starting a
+new workspace with unsaved changes asks first, and choosing Save then cancelling the name sheet
+leaves your terminals alone. Moving between terminals is not an edit: focus and stacking order
+change constantly, so they are excluded from the comparison, while adding, closing, renaming,
+moving and resizing terminals all count.
 
 ```json
 {
@@ -263,7 +283,7 @@ Sources/Termsie/
   Sidebar/    TerminalSidebarView, TerminalRowView, SidebarFooterView, ThumbnailRenderer,
               ThumbnailSource, TerminalSettingsPopover, SidebarContainerView, BadgeDrawing
   Session/    WorkspaceStore (v2 format), LegacyMigration (v1 split trees → terminals)
-  Settings/   SettingsWindowController (global font + environment manager), FontCatalog
+  Settings/   SettingsWindowController (general, font, environments), SettingsForm, FontCatalog
 ```
 
 ## Tests

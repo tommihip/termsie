@@ -53,6 +53,23 @@ enum DebugDriver {
             if parts.count == 2 {
                 controller.simulateDrag(pane, zone: .bottomRight, delta: NSPoint(x: parts[0], y: parts[1]))
             }
+        } else if action == "dumpWorkspace", let controller {
+            NSLog("DebugDriver workspace: name=[\(controller.workspaceName ?? "-")] modified=\(controller.isWorkspaceModified)")
+        } else if action.hasPrefix("saveWorkspaceNamed:"), let controller {
+            controller.saveWorkspaceForTesting(named: String(action.dropFirst(19)))
+        } else if action == "newWorkspaceDiscarding", let controller {
+            controller.newWorkspaceForTesting()
+        } else if action.hasPrefix("resizeWindow:"), let controller {
+            let parts = action.dropFirst(13).split(separator: "x").compactMap { Double($0) }
+            if parts.count == 2, let window = controller.window {
+                var f = window.frame
+                f.size = NSSize(width: parts[0], height: parts[1])
+                window.setFrame(f, display: true)
+            }
+        } else if action == "dumpBadges", let controller {
+            for pane in controller.panes {
+                NSLog("DebugDriver badge: #\(pane.index) active=\(pane.isActive) badge=\(pane.header.badge)")
+            }
         } else if action == "dumpFonts", let controller {
             let global = ConfigStore.shared.config.font
             NSLog("DebugDriver globalFont: \(global.family) \(global.size)")
@@ -99,6 +116,14 @@ enum DebugDriver {
         } else if action.hasPrefix("removeEnvironment:") {
             let target = String(action.dropFirst(18))
             ConfigStore.shared.update { $0.environments.removeAll { $0.id == target } }
+        } else if action.hasPrefix("clickSetting:") {
+            let title = String(action.dropFirst(13))
+            let clicked = SettingsWindowController.shared.clickGeneralSetting(title)
+            NSLog("DebugDriver clickSetting: [\(title)] found=\(clicked)")
+        } else if action.hasPrefix("readSetting:") {
+            let title = String(action.dropFirst(12))
+            let state = SettingsWindowController.shared.generalSettingState(title)
+            NSLog("DebugDriver readSetting: [\(title)] shown=\(state.map(String.init) ?? "-")")
         } else if action == "openSettings" {
             SettingsWindowController.shared.show()
         } else if action == "dumpNames", let controller {

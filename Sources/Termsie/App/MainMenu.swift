@@ -108,7 +108,11 @@ enum MainMenu {
 
         // Workspaces
         let workspaces = NSMenu(title: "Workspaces")
-        workspaces.addItem(item("Save Workspace…", #selector(TerminalWindowController.saveWorkspace(_:)), "s", [.command, .shift]))
+        workspaces.addItem(item("New Workspace", #selector(TerminalWindowController.newWorkspace(_:)), "n", [.command, .option]))
+        workspaces.addItem(.separator())
+        workspaces.addItem(item("Save Workspace", #selector(TerminalWindowController.saveWorkspace(_:)), "s"))
+        workspaces.addItem(item("Save Workspace As…", #selector(TerminalWindowController.saveWorkspaceAs(_:)), "s", [.command, .shift]))
+        workspaces.addItem(.separator())
         workspaces.addItem(item("Open Workspace File…", #selector(AppDelegate.openWorkspaceFile(_:)), "o", [.command, .shift]))
         workspaces.addItem(item("Show Workspaces Folder", #selector(AppDelegate.openWorkspacesFolder(_:))))
         workspaces.addItem(.separator())

@@ -165,6 +165,70 @@ if [[ -f $fix/termsie/config.json ]] && grep -q 'qa-sandbox' $fix/termsie/config
   ok "the change is written to config.json"
 else bad "config.json was not updated"; fi
 
+print "\n== the window resize mode is a real choice"
+fix=$ROOT/resizeon; mkdir -p $fix
+out=$(run $fix "newTerminalAction,wait,tileGrid,frames,resizeWindow:900x600,wait,frames" --cwd $HOME)
+sizes=(${(f)"$(print -r -- "$out" | grep 'frame: #2' | sed -E 's/.*frame=\{\{[0-9-]+, [0-9-]+\}, \{([0-9]+), ([0-9]+)\}\}.*/\1x\2/')"})
+if [[ -n "${sizes[1]:-}" && -n "${sizes[2]:-}" && "${sizes[1]}" != "${sizes[2]}" ]]; then
+  ok "scaling mode resizes terminals with the window (${sizes[1]} -> ${sizes[2]})"
+else bad "terminals did not scale (${sizes[1]:-none} -> ${sizes[2]:-none})"; fi
+fix=$ROOT/resizeoff; mkdir -p $fix/termsie
+print '{"resizeTerminalsWithWindow":false}' > $fix/termsie/config.json
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --snapshot $fix/shot.png --cwd $HOME --quit       --actions "newTerminalAction,wait,tileGrid,frames,resizeWindow:900x600,wait,frames" 2>&1)
+sizes=(${(f)"$(print -r -- "$out" | grep 'frame: #2' | sed -E 's/.*frame=\{\{[0-9-]+, [0-9-]+\}, \{([0-9]+), ([0-9]+)\}\}.*/\1x\2/')"})
+if [[ -n "${sizes[1]:-}" && "${sizes[1]}" == "${sizes[2]:-}" ]]; then
+  ok "hold-still mode leaves terminals untouched (${sizes[1]})"
+else bad "terminals moved in hold-still mode (${sizes[1]:-none} -> ${sizes[2]:-none})"; fi
+
+print "\n== resizing the window is not mistaken for terminal activity"
+# Paired with a control, so this cannot pass vacuously: the badge must still appear for real output.
+fix=$ROOT/badgectl; mkdir -p $fix
+out=$(run $fix "newTerminalAction,wait,type:sleep 4; echo LATE
+,wait,pane:1,wait,wait,wait,wait,wait,wait,dumpBadges" --cwd $HOME)
+check "genuine output still raises the badge" "$(print -r -- "$out" | grep '#2 active=false badge=activity')"
+fix=$ROOT/badgeresize; mkdir -p $fix
+out=$(run $fix "newTerminalAction,wait,tileGrid,wait,wait,pane:1,wait,resizeWindow:900x600,wait,resizeWindow:1200x780,wait,wait,dumpBadges" --cwd $HOME)
+check "resizing leaves inactive terminals clean" "$(print -r -- "$out" | grep '#2 active=false badge=none')"
+
+print "\n== workspaces can be created, saved and reopened"
+fix=$ROOT/ws; mkdir -p $fix
+out=$(run $fix "wait,dumpWorkspace,newTerminalAction,wait,dumpWorkspace,saveWorkspaceNamed:alpha,wait,dumpWorkspace,newTerminalAction,wait,dumpWorkspace,newWorkspaceDiscarding,wait,dumpWorkspace,dumpTerminals" --cwd $HOME)
+states=(${(f)"$(print -r -- "$out" | sed -nE 's/.*(name=\[[^]]*\] modified=[a-z]*).*/\1/p')"})
+check "a fresh window starts unmodified"   "$([[ "${states[1]}" == "name=[-] modified=false" ]] && echo yes)"
+check "adding a terminal marks it edited"  "$([[ "${states[2]}" == "name=[-] modified=true" ]] && echo yes)"
+check "saving names it and clears edited"  "$([[ "${states[3]}" == "name=[alpha] modified=false" ]] && echo yes)"
+check "further edits mark it again"        "$([[ "${states[4]}" == "name=[alpha] modified=true" ]] && echo yes)"
+check "a new workspace is empty and clean" "$([[ "${states[5]}" == "name=[-] modified=false" ]] && echo yes)"
+n=$(print -r -- "$out" | grep 'DebugDriver state:' | tail -1 | grep -o '=open' | wc -l | tr -d ' ')
+check "and holds exactly one terminal"     "$([[ "$n" == "1" ]] && echo yes)"
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --workspace alpha --snapshot $fix/s2.png --actions "wait,wait,dumpWorkspace" --quit 2>&1)
+check "reopening restores the name"        "$(print -r -- "$out" | grep 'name=\[alpha\] modified=false')"
+# Clicking around must not count as an edit, or every workspace would always look dirty.
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --workspace alpha --snapshot $fix/s3.png --actions "wait,wait,pane:2,wait,pane:1,wait,dumpWorkspace" --quit 2>&1)
+check "focusing terminals is not an edit"  "$(print -r -- "$out" | grep 'name=\[alpha\] modified=false')"
+
+print "\n== the General settings tab drives the real config"
+fix=$ROOT/general; mkdir -p $fix
+out=$(run $fix "wait,openSettings,wait,readSetting:Resize terminals,clickSetting:Resize terminals,wait,readSetting:Resize terminals" --cwd $HOME)
+check "the checkbox is found and bound"    "$(print -r -- "$out" | grep 'clickSetting: \[Resize terminals\] found=true')"
+check "it starts showing the config value" "$(print -r -- "$out" | grep 'readSetting: \[Resize terminals\] shown=true')"
+check "clicking it flips what is shown"    "$(print -r -- "$out" | grep 'readSetting: \[Resize terminals\] shown=false')"
+if [[ -f $fix/termsie/config.json ]]; then
+  wrote=$(python3 -c "import json;c=json.load(open('$fix/termsie/config.json'));print(c.get('resizeTerminalsWithWindow'), c.get('snapToCells'))")
+  # The neighbouring key must be untouched, which is what catches a checkbox bound to the wrong one.
+  if [[ "$wrote" == "False True" ]]; then ok "it writes that key and only that key"
+  else bad "wrong keys written: $wrote"; fi
+else bad "config.json was not written"; fi
+
+# The whole chain: flipping the switch in Settings changes what a window resize does.
+# A fresh fixture, because the check above already persisted a flipped value into $fix.
+fix=$ROOT/general2; mkdir -p $fix
+out=$(run $fix "newTerminalAction,wait,tileGrid,frames,openSettings,wait,clickSetting:Resize terminals,wait,resizeWindow:700x500,wait,frames" --cwd $HOME)
+sizes=(${(f)"$(print -r -- "$out" | grep 'frame: #2' | sed -E 's/.*frame=\{\{[0-9-]+, [0-9-]+\}, \{([0-9]+), ([0-9]+)\}\}.*/\1x\2/')"})
+if [[ -n "${sizes[1]:-}" && "${sizes[1]}" == "${sizes[2]:-}" ]]; then
+  ok "toggling it takes effect immediately (${sizes[1]})"
+else bad "toggle had no effect (${sizes[1]:-none} -> ${sizes[2]:-none})"; fi
+
 print "\n== the settings window opens"
 fix=$ROOT/settings2; mkdir -p $fix
 out=$(run $fix "wait,openSettings,wait,openEnvironmentSettings,wait" --cwd $HOME)

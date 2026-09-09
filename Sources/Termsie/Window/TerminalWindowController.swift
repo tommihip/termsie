@@ -16,6 +16,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     private var configObserver: NSObjectProtocol?
     private var isClosing = false
     private var settingsPopover: TerminalSettingsPopover?
+    /// The workspace this tab represents, and the layout as last saved or loaded. Together they
+    /// answer "does this have unsaved changes?".
+    private(set) var workspaceName: String?
+    private var savedSignature: String = ""
 
     /// True while a drag or resize is running its own event loop. A shell exiting mid-drag would
     /// otherwise deallocate the very view being dragged.
@@ -27,7 +31,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     // MARK: Init
 
-    init(layout: TabLayout?, frame: NSRect?, sidebarVisible: Bool? = nil, sidebarWidth: Double? = nil) {
+    init(layout: TabLayout?, frame: NSRect?, sidebarVisible: Bool? = nil, sidebarWidth: Double? = nil,
+         workspaceName: String? = nil) {
         let config = ConfigStore.shared.config
         headersVisible = config.showPaneHeaders
 
@@ -63,8 +68,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         if frame == nil { window.center() }
 
         let initial = layout ?? TabLayout.single()
+        self.workspaceName = workspaceName ?? initial.workspaceName
         registry.load(initial)
         build(initial)
+        markSaved()
 
         configObserver = NotificationCenter.default.addObserver(forName: .termsieConfigChanged,
                                                                object: nil, queue: .main) { [weak self] _ in
@@ -243,6 +250,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     }
 
     private func stateChanged() {
+        updateWindowTitle()
         onStateChanged?(self)
     }
 
@@ -294,6 +302,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         }
         if broadcastEnabled { title = "⇶ " + title }
         window.title = title
+        if let workspaceName {
+            window.subtitle = isWorkspaceModified ? "\(workspaceName) — Edited" : workspaceName
+        } else {
+            window.subtitle = isWorkspaceModified ? "Untitled — Edited" : "Untitled"
+        }
     }
 
     /// Direction cone plus distance. The old edge test required strict non-overlap and would
@@ -401,6 +414,21 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         pane.frame = resolved
         pane.endResizeGesture(zone)
         canvas.commitFraction(for: pane)
+    }
+
+    /// Saves under a name without the sheet, for headless tests.
+    func saveWorkspaceForTesting(named name: String) {
+        var layout = snapshot()
+        layout.workspaceName = name
+        try? WorkspaceStore.save(Workspace(name: name, layout: layout))
+        workspaceName = name
+        markSaved()
+        stateChanged()
+    }
+
+    /// Clears without the confirmation sheet, for headless tests.
+    func newWorkspaceForTesting() {
+        resetToEmptyWorkspace()
     }
 
     /// The name shown in a terminal's header and in its sidebar row. They must agree.
@@ -532,7 +560,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     // MARK: Tabs
 
     func addTab(layout: TabLayout) -> TerminalWindowController {
-        let controller = AppDelegate.shared.makeWindowController(layout: layout, frame: nil)
+        let controller = AppDelegate.shared.makeWindowController(layout: layout, frame: nil,
+                                                                 workspaceName: layout.workspaceName)
         if let mine = window, let theirs = controller.window {
             mine.addTabbedWindow(theirs, ordered: .above)
             theirs.makeKeyAndOrderFront(nil)
@@ -546,6 +575,16 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     // MARK: Serialization
 
+    /// Records the current layout as the saved baseline.
+    fileprivate func markSaved() {
+        savedSignature = snapshot().modificationSignature()
+        updateWindowTitle()
+    }
+
+    var isWorkspaceModified: Bool {
+        snapshot().modificationSignature() != savedSignature
+    }
+
     func snapshot(includeLiveState: Bool = false) -> TabLayout {
         for pane in registry.livePanes {
             registry.mutate(pane.definitionID) { def in
@@ -553,7 +592,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
                 def.z = pane.zIndex
             }
         }
-        return registry.snapshot(selected: activePane?.definitionID, includeLiveState: includeLiveState)
+        var layout = registry.snapshot(selected: activePane?.definitionID, includeLiveState: includeLiveState)
+        layout.workspaceName = workspaceName
+        return layout
     }
 
     // MARK: Menu actions
@@ -638,8 +679,81 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     }
     @objc func renameActivePane(_ sender: Any?) { renamePane(activePane) }
 
+    /// Clears this tab back to a single empty terminal, offering to save first.
+    @objc func newWorkspace(_ sender: Any?) {
+        confirmDiscardingChanges { [weak self] in self?.resetToEmptyWorkspace() }
+    }
+
+    /// Runs `proceed` once the user has dealt with any unsaved changes.
+    private func confirmDiscardingChanges(_ proceed: @escaping () -> Void) {
+        guard isWorkspaceModified, let window else { proceed(); return }
+        let alert = NSAlert()
+        let name = workspaceName ?? "this workspace"
+        alert.messageText = "Save changes to \(name)?"
+        alert.informativeText = "Your terminals, their layout and their settings will be lost otherwise."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard let self else { return }
+            switch response {
+            case .alertFirstButtonReturn:
+                // Only continue once the save actually happened, so Cancel in the name sheet
+                // does not silently discard the workspace anyway.
+                self.performSave { saved in if saved { proceed() } }
+            case .alertSecondButtonReturn:
+                proceed()
+            default:
+                break
+            }
+        }
+    }
+
+    private func resetToEmptyWorkspace() {
+        for id in registry.order {
+            if let pane = registry.pane(for: id) {
+                pane.terminate()
+                canvas.remove(pane)
+            }
+            sidebar.forgetCache(for: id)
+        }
+        activePane = nil
+        registry.load(TabLayout())
+        workspaceName = nil
+        let fresh = TerminalDefinition(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+        let id = registry.insert(fresh)
+        renumber()
+        openTerminal(id, isReopen: false)
+        markSaved()
+        stateChanged()
+    }
+
+    /// Saves to the current workspace, asking for a name the first time.
     @objc func saveWorkspace(_ sender: Any?) {
-        guard let window else { return }
+        performSave { _ in }
+    }
+
+    private func performSave(_ completion: @escaping (Bool) -> Void) {
+        guard let name = workspaceName else {
+            saveWorkspaceAs(nil, completion: completion)
+            return
+        }
+        do {
+            try WorkspaceStore.save(Workspace(name: name, layout: snapshot()))
+            markSaved()
+            completion(true)
+        } catch {
+            presentError(error)
+            completion(false)
+        }
+    }
+
+    @objc func saveWorkspaceAs(_ sender: Any?) {
+        saveWorkspaceAs(sender, completion: { _ in })
+    }
+
+    private func saveWorkspaceAs(_ sender: Any?, completion: @escaping (Bool) -> Void) {
+        guard let window else { completion(false); return }
         let alert = NSAlert()
         alert.messageText = "Save Workspace"
         alert.informativeText = "Saves this tab's terminals, their folders and their startup commands to ~/.config/termsie/workspaces/."
@@ -648,6 +762,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 52))
         let field = NSTextField(frame: NSRect(x: 0, y: 28, width: 280, height: 24))
         field.placeholderString = "workspace name"
+        field.stringValue = workspaceName ?? ""
         accessory.addSubview(field)
         let check = NSButton(checkboxWithTitle: "Include commands currently running", target: nil, action: nil)
         check.frame = NSRect(x: 0, y: 0, width: 280, height: 20)
@@ -655,12 +770,21 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         alert.accessoryView = accessory
         alert.window.initialFirstResponder = field
         alert.beginSheetModal(for: window) { [weak self] response in
-            guard let self, response == .alertFirstButtonReturn else { return }
+            guard let self, response == .alertFirstButtonReturn else { completion(false); return }
             let name = field.stringValue.trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty else { return }
-            let layout = self.snapshot(includeLiveState: check.state == .on)
-            do { try WorkspaceStore.save(Workspace(name: name, layout: layout)) }
-            catch { self.presentError(error) }
+            guard !name.isEmpty else { completion(false); return }
+            var layout = self.snapshot(includeLiveState: check.state == .on)
+            layout.workspaceName = name
+            do {
+                try WorkspaceStore.save(Workspace(name: name, layout: layout))
+                self.workspaceName = name
+                self.markSaved()
+                self.stateChanged()
+                completion(true)
+            } catch {
+                self.presentError(error)
+                completion(false)
+            }
         }
     }
 
@@ -724,6 +848,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             return activePane != nil
         case #selector(duplicateTerminal(_:)), #selector(deleteTerminal(_:)), #selector(showTerminalSettings(_:)):
             return !registry.isEmpty
+        case #selector(saveWorkspace(_:)):
+            item.title = workspaceName.map { "Save Workspace “\($0)”" } ?? "Save Workspace…"
+            return !registry.isEmpty
+        case #selector(newWorkspace(_:)):
+            return true
         default:
             return true
         }

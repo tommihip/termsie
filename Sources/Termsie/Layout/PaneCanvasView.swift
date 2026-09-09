@@ -164,12 +164,41 @@ final class PaneCanvasView: NSView {
     }
 
     override func resizeSubviews(withOldSize oldSize: NSSize) {
-        applyFractions()
+        layoutForWindowResize()
     }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        applyFractions()
+        layoutForWindowResize()
+    }
+
+    /// How the terminals respond when the window itself changes size.
+    ///
+    /// Scaling re-derives every frame from its fraction, so the arrangement is preserved
+    /// proportionally. Holding still keeps the pixel frames and instead rewrites the fractions to
+    /// match, which keeps "the fraction is the source of truth" true in both modes.
+    private func layoutForWindowResize() {
+        if ConfigStore.shared.config.resizeTerminalsWithWindow {
+            applyFractions()
+        } else {
+            holdTerminalsInPlace()
+        }
+    }
+
+    private func holdTerminalsInPlace() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        for pane in panes {
+            var r = pane.frame
+            // Terminals keep their size, but a shrinking window must not leave one unreachable.
+            let keep = PaneChrome.keepVisible
+            r.origin.x = min(max(r.minX, bounds.minX - max(0, r.width - keep)), max(bounds.minX, bounds.maxX - keep))
+            r.origin.y = min(max(r.minY, bounds.minY), max(bounds.minY, bounds.maxY - min(keep, r.height)))
+            if pane.isCollapsed { r.size.height = pane.collapsedHeight }
+            if pane.frame != r { pane.frame = r }
+            var f = fraction(for: pane.frame)
+            if pane.isCollapsed { f.size.height = pane.layoutFraction.height }
+            pane.layoutFraction = clampFraction(f)
+        }
     }
 
     // MARK: Snapping

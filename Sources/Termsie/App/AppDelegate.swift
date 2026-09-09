@@ -123,9 +123,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Windows
 
     func makeWindowController(layout: TabLayout?, frame: NSRect?,
-                              sidebarVisible: Bool? = nil, sidebarWidth: Double? = nil) -> TerminalWindowController {
+                              sidebarVisible: Bool? = nil, sidebarWidth: Double? = nil,
+                              workspaceName: String? = nil) -> TerminalWindowController {
         let controller = TerminalWindowController(layout: layout, frame: frame,
-                                                  sidebarVisible: sidebarVisible, sidebarWidth: sidebarWidth)
+                                                  sidebarVisible: sidebarVisible, sidebarWidth: sidebarWidth,
+                                                  workspaceName: workspaceName)
         controller.onClose = { [weak self] c in
             self?.controllers.removeAll { $0 === c }
             self?.scheduleSessionSave()
@@ -150,7 +152,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func openWorkspace(_ workspace: Workspace, inNewTab: Bool) {
         // Fresh ids per open, so opening the same workspace twice does not make two live
         // terminals write into one history file.
-        let layout = workspace.layout.regeneratingIDs()
+        var layout = workspace.layout.regeneratingIDs()
+        layout.workspaceName = workspace.name
         if inNewTab, let key = keyController {
             _ = key.addTab(layout: layout)
         } else {

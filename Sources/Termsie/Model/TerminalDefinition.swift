@@ -112,10 +112,13 @@ struct TabLayout: Codable, Equatable {
     var terminals: [TerminalDefinition] = []
     /// Id of the terminal that was focused.
     var selected: String?
+    /// The workspace this tab came from, so session restore can keep the association.
+    var workspaceName: String?
 
-    init(terminals: [TerminalDefinition] = [], selected: String? = nil) {
+    init(terminals: [TerminalDefinition] = [], selected: String? = nil, workspaceName: String? = nil) {
         self.terminals = terminals
         self.selected = selected
+        self.workspaceName = workspaceName
     }
 
     init(from decoder: Decoder) throws {
@@ -123,6 +126,26 @@ struct TabLayout: Codable, Equatable {
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? TabLayout.currentVersion
         terminals = try c.decodeIfPresent([TerminalDefinition].self, forKey: .terminals) ?? []
         selected = try c.decodeIfPresent(String.self, forKey: .selected)
+        workspaceName = try c.decodeIfPresent(String.self, forKey: .workspaceName)
+    }
+
+    /// A comparable form used to decide whether a workspace has unsaved changes.
+    ///
+    /// Stacking order and focus deliberately do not count: both change every time you click a
+    /// terminal, and treating that as an edit would leave every workspace permanently "modified".
+    func modificationSignature() -> String {
+        var copy = self
+        copy.selected = nil
+        copy.workspaceName = nil
+        for i in copy.terminals.indices {
+            copy.terminals[i].z = 0
+            copy.terminals[i].frame = copy.terminals[i].frame?.map { ($0 * 1000).rounded() / 1000 }
+        }
+        copy.terminals.sort { $0.id < $1.id }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(copy) else { return "" }
+        return String(decoding: data, as: UTF8.self)
     }
 
     var isEmpty: Bool { terminals.isEmpty }

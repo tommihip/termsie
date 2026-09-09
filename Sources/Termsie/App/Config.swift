@@ -191,6 +191,9 @@ struct TermsieConfig: Codable, Equatable {
     var history = History()
     var startupCommands = StartupCommands()
     var sidebar = Sidebar()
+    /// When the window is resized, scale the terminals with it. Off means they keep their size
+    /// and position and only stay reachable inside the smaller window.
+    var resizeTerminalsWithWindow = true
     /// Quantize terminal resizes to whole character cells so the emulator only reflows when the
     /// grid actually changes.
     var snapToCells = true
@@ -225,6 +228,7 @@ struct TermsieConfig: Codable, Equatable {
         history = try c.decodeIfPresent(History.self, forKey: .history) ?? history
         startupCommands = try c.decodeIfPresent(StartupCommands.self, forKey: .startupCommands) ?? startupCommands
         sidebar = try c.decodeIfPresent(Sidebar.self, forKey: .sidebar) ?? sidebar
+        resizeTerminalsWithWindow = try c.decodeIfPresent(Bool.self, forKey: .resizeTerminalsWithWindow) ?? resizeTerminalsWithWindow
         snapToCells = try c.decodeIfPresent(Bool.self, forKey: .snapToCells) ?? snapToCells
         colors = try c.decodeIfPresent(Colors.self, forKey: .colors) ?? colors
     }

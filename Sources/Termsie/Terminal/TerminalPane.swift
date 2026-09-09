@@ -65,6 +65,9 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     private var pollTimer: Timer?
     private var findBar: FindBarView?
     private var startedAt: CFTimeInterval = 0
+    /// Redraws provoked by a resize are not news, so the activity badge ignores output until this
+    /// time. Set whenever the character grid changes.
+    private var ignoreActivityUntil: CFTimeInterval = 0
     private var pendingCommands: [String] = []
     private var pendingCommandWork: DispatchWorkItem?
     private var metalRequested = false
@@ -417,8 +420,10 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         if !pendingCommands.isEmpty {
             scheduleCommandFlush(after: Double(max(ConfigStore.shared.config.commandDelayMs, 0)) / 1000)
         }
-        // The initial prompt is not "activity".
-        guard !isActive, !hasUnseenActivity, CACurrentMediaTime() - startedAt > 1.0 else { return }
+        let now = CACurrentMediaTime()
+        // The initial prompt is not "activity", and neither is a shell redrawing itself because
+        // the window changed size.
+        guard !isActive, !hasUnseenActivity, now - startedAt > 1.0, now >= ignoreActivityUntil else { return }
         hasUnseenActivity = true
         updateBadge()
     }
@@ -657,6 +662,10 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
 
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
         thumbnailDirty = true
+        // A grid change sends SIGWINCH, and shells and full-screen programs answer it by
+        // repainting. That output is a consequence of the resize, not something the user needs
+        // flagged, so suppress the badge briefly. Each further change pushes the window out.
+        ignoreActivityUntil = CACurrentMediaTime() + 0.9
         if isUserResizing { header.transientNote = "\(newCols) × \(newRows)" }
         else { header.transientNote = nil }
     }
