@@ -141,6 +141,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
         generalForm.checkbox("Show window buttons on each terminal", \.trafficLights)
         generalForm.checkbox("Ask before closing a terminal that is running something",
                              \.confirmClosingRunningProcess)
+
+        generalForm.section("Copying")
+        generalForm.checkbox("Copy a selection as soon as it is made", \.copy.autoCopyOnSelect,
+                             hint: "Dragging over text, double-clicking a word or triple-clicking a line puts it straight on the clipboard.")
+        generalForm.checkbox("Show the copy tools in the terminal list", \.copy.showTools)
+        generalForm.checkbox("Let the shell mark where commands begin and end", \.copy.commandMarks,
+                             hint: "Copying one command and its output needs the shell to say where each prompt starts. Off, Termsie falls back to the line it saw you type. Takes effect in terminals opened afterwards.")
+        generalForm.checkbox("Trim blank space from copied text", \.copy.trimCopiedText,
+                             hint: "Drops the padding a terminal grid puts at the end of every row, and the blank screen below the last line.")
         return generalForm
     }
 

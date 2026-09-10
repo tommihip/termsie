@@ -43,6 +43,7 @@ again.
 | **Environments** | Tag a terminal production, staging, development, or anything you define. Its background, header, badge and list row all take that colour. |
 | **Saved terminals** | Each terminal keeps a working folder and commands to run on open, like activating a virtualenv. Close it and it stays in the list; click to bring it back exactly as it was. |
 | **Its own command history** | Press Up in a terminal and you get what *you* typed *there*. No changes to your dotfiles required. |
+| **Copy tools** | Copy one command, everything it printed, or the whole terminal since the last `clear`, from the list or a keystroke. Selections can go to the clipboard the moment you make them, and they stay put while output keeps arriving. |
 | **Workspaces** | Save a whole window of terminals to a file. New, Save, Save As, and a prompt before you throw away unsaved changes. |
 | **Genuinely native** | Swift and AppKit, GPU text rendering through Metal, translucency and blur like Terminal.app. No Electron, no web view. |
 
@@ -119,6 +120,10 @@ You get one terminal and an empty list. From there:
 | Toggle terminal headers | ⇧⌘H |
 | Broadcast input to all terminals | ⌥⌘I |
 | Clear scrollback | ⌘K |
+| Copy last command output | ⇧⌘C |
+| Copy last command | ⌥⌘C |
+| Copy whole terminal | ⌃⌘C |
+| Auto-copy selections on and off | ⌥⇧⌘C |
 | Find / next / previous | ⌘F / ⌘G / ⇧⌘G |
 | Bigger / smaller text (focused terminal) | ⌘= / ⌘- |
 | Use the global font again | ⌘0 |
@@ -132,7 +137,8 @@ double-click the header to maximize, right-click it for a menu including its env
 three buttons at the top left close the terminal, roll it up to its header, and maximize it.
 ⌥⌘-drag anywhere inside a terminal also moves it, which is how you move one with headers hidden.
 In the list, click a row to open or focus it, double-click for its settings, drag rows to reorder,
-and use **+ New Terminal** at the bottom to add one.
+and use **+ New Terminal** at the bottom to add one. Above that button sit the copy tools, which
+act on whichever terminal has focus.
 
 Closing a terminal keeps it in the list. Deleting removes it for good. The window closes only when
 its last terminal is deleted, so a window of saved-but-closed terminals is a normal state.
@@ -145,7 +151,9 @@ its last terminal is deleted, so a window of saved-but-closed terminals is a nor
 
 **General** holds the global behaviour switches: whether terminals resize along with the window,
 whether resizing snaps to whole character cells, whether the last session reopens on launch,
-whether terminals show headers and window buttons, and whether closing a busy terminal asks first.
+whether terminals show headers and window buttons, whether closing a busy terminal asks first, and
+the four copying settings — auto-copy on select, showing the copy tools in the list, letting the
+shell mark where commands begin, and trimming blank space out of copied text.
 
 **Font** sets the global font every terminal starts from. Only fixed-pitch families are listed,
 because a terminal draws on a character grid and a proportional font would misalign every column.
@@ -206,6 +214,12 @@ Every key is optional.
     "retentionDays": 30
   },
   "startupCommands": { "mode": "shim", "echo": true, "recordInHistory": false },
+  "copy": {
+    "autoCopyOnSelect": false,
+    "showTools": true,
+    "commandMarks": true,
+    "trimCopiedText": true
+  },
   "sidebar": { "visible": true, "width": 264, "rowHeight": 84, "thumbnailRefreshMs": 500 }
 }
 ```
@@ -225,8 +239,14 @@ Every key is optional.
   to `false` for a fully opaque window.
 - `environments`: your own list, in menu order. A `tint` of `null` means no colour; `strength` is
   how far the background is pulled toward the tint.
-- `shellIntegration`: `"off"` disables the history and startup-command machinery entirely, and
-  terminals launch exactly as a plain shell would.
+- `shellIntegration`: `"off"` disables the history, startup-command and command-mark machinery
+  entirely, and terminals launch exactly as a plain shell would.
+- `copy.autoCopyOnSelect`: put every mouse selection on the clipboard as soon as it is made.
+  Same switch as the one at the top of the copy tools.
+- `copy.commandMarks`: ask the shell to say where each prompt, command and output begins. See
+  [Copying a command, not a rectangle](#copying-a-command-not-a-rectangle).
+- `copy.trimCopiedText`: drop the right-hand padding a terminal grid puts on every row, and the
+  blank screen below the last line.
 
 Colors live under `colors`, including `sidebarBackground`, `sidebarSelection`, and the 16-entry
 `ansi` palette.
@@ -307,6 +327,40 @@ shell gets `HISTFILE` alone. Anything unrecognized or ambiguous falls back to le
 completely untouched — a terminal with shared history is a missing feature, a terminal with a
 broken `PATH` is a broken app.
 
+### Copying a command, not a rectangle
+
+Selecting output with the mouse gets you a rectangle of screen. The copy tools get you a
+*command*: its prompt, what was typed, and everything it printed, whether it has finished or is
+still running.
+
+That needs the shell to say where each of those begins, which it does through OSC 133 — a handful
+of zero-width escape sequences around the prompt. Termsie's shim emits them for zsh and bash, and
+picks up any shell that already emits them itself, including one on the far end of an `ssh`
+session. The emulator tags every cell it writes with the role the shell claimed for it, which is
+what lets *Copy Last Command* return the command without the prompt in front of it, however wide
+that prompt was.
+
+Shells that say nothing still get working buttons: Termsie falls back to the row it last saw you
+press Return on, and strips whatever looks like a prompt off the front. That is a guess and is
+labelled as one — it exists so the buttons do something sensible over `ssh` to a machine you have
+not set up.
+
+*Copy Whole Terminal* stops at the last `clear`. `clear` itself discards the scrollback, so there
+is nothing to stop at; Ctrl-L does not, so Termsie watches the byte stream for the erase sequence
+and remembers the row the screen started on.
+
+### A selection that survives the next line of output
+
+SwiftTerm drops the selection on every feed while mouse reporting is on, so text you highlighted
+disappears as soon as the next line lands — exactly when you are most likely to be copying from a
+terminal you left running. Turning mouse reporting off would fix it and break every full-screen
+program.
+
+Instead the selection's anchors are taken before each chunk is fed and put back afterwards, shifted
+by however many rows the scrollback trimmed in between. It follows its text as the screen scrolls,
+and is dropped rather than left pointing somewhere else once that text falls out of the scrollback
+entirely.
+
 ### Thumbnails that cost nothing
 
 Thumbnails are drawn from each terminal's character buffer, not captured from the screen. The
@@ -346,9 +400,11 @@ Sources/Termsie/
   Layout/     PaneCanvasView (floating terminals), PaneChrome (hit zones), Arrange (tile/cascade),
               LayoutTree (legacy v1 decode only)
   Terminal/   TerminalPane, TermsieTerminalView, PaneHeaderView, TrafficLightsView, FindBarView,
-              ProcessInspector, ShellIntegration + ShimScripts (history and startup commands)
-  Sidebar/    TerminalSidebarView, TerminalRowView, SidebarFooterView, ThumbnailRenderer,
-              ThumbnailSource, TerminalSettingsPopover, SidebarContainerView, BadgeDrawing
+              ProcessInspector, ShellIntegration + ShimScripts (history, startup commands, marks),
+              CommandMarks (OSC 133 stream scanner), TerminalTextCapture (buffer → clipboard)
+  Sidebar/    TerminalSidebarView, TerminalRowView, SidebarFooterView, SidebarCopyToolsView,
+              ThumbnailRenderer, ThumbnailSource, TerminalSettingsPopover, SidebarContainerView,
+              BadgeDrawing
   Session/    WorkspaceStore (v2 format), LegacyMigration (v1 split trees → terminals)
   Settings/   SettingsWindowController (general, font, environments), SettingsForm, FontCatalog
 ```
@@ -366,7 +422,9 @@ real pseudo-terminals with `expect`.
 
 `test-app.sh` drives the real app and checks thumbnail correctness and cost, session migration,
 terminal lifecycle, startup commands, dragging and snapping, translucency, collapse, environments,
-font inheritance, workspace state, and pointer ownership where terminals overlap.
+font inheritance, workspace state, pointer ownership where terminals overlap, the copy tools under
+zsh, bash and a shell that marks nothing, and that a selection outlives the output arriving under
+it.
 
 Both use throwaway fixture directories and never touch your real configuration.
 

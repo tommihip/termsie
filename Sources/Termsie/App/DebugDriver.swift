@@ -113,6 +113,35 @@ enum DebugDriver {
         if action.hasPrefix("type:") {
             let text = String(action.dropFirst(5)).replacingOccurrences(of: "\\n", with: "\r")
             controller?.activePane?.terminalView.send(txt: text)
+        } else if action.hasPrefix("copy:"), let controller {
+            let name = String(action.dropFirst(5))
+            guard let target = TerminalPane.CopyTarget(rawValue: name) else {
+                NSLog("DebugDriver copy: unknown target [\(name)]")
+                return
+            }
+            NSLog("DebugDriver copy: \(name) copied=\(controller.performCopy(target))")
+        } else if action == "dumpClipboard" {
+            let text = NSPasteboard.general.string(forType: .string) ?? ""
+            // Through a format argument, not interpolated: copied text is full of % signs.
+            NSLog("DebugDriver clipboard: [%@]", text.replacingOccurrences(of: "\n", with: "\\n"))
+        } else if action == "autoCopyNow", let controller {
+            let did = controller.activePane?.terminalView.autoCopySelection() ?? false
+            NSLog("DebugDriver autoCopy: copied=\(did)")
+        } else if action == "dumpCopyState", let controller {
+            let pane = controller.activePane
+            NSLog("DebugDriver copyState: \(pane?.terminalView.copyStateDescription ?? "-")")
+        } else if action.hasPrefix("select:"), let controller {
+            // select:<row>x<col>x<row>x<col>, rows relative to the visible screen.
+            let parts = action.dropFirst(7).split(separator: "x").compactMap { Int($0) }
+            if parts.count == 4 {
+                controller.activePane?.terminalView.selectForTesting(
+                    fromRow: parts[0], fromCol: parts[1], toRow: parts[2], toCol: parts[3])
+            }
+        } else if action == "dumpSelection", let controller {
+            let view = controller.activePane?.terminalView
+            let text = view?.getSelection() ?? ""
+            NSLog("DebugDriver selection: active=%@ text=[%@]", "\(view?.selectionActive ?? false)",
+                  text.replacingOccurrences(of: "\n", with: "\\n"))
         } else if action == "wait" {
             return
         } else if action == "terminate" {

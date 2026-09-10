@@ -10,7 +10,7 @@ import Foundation
 enum ShimScripts {
     /// Bump when any script below changes; generated directories carry this and regenerate on
     /// mismatch after an app upgrade.
-    static let version = "1"
+    static let version = "2"
 
     private static let header = """
     # Termsie shell integration — generated, do not edit. Regenerated when Termsie updates.
@@ -166,6 +166,30 @@ enum ShimScripts {
     }
     typeset -ga precmd_functions
     precmd_functions+=( __termsie_precmd )
+
+    # ----------------------------------------------------------- command marks
+    # OSC 133 tells Termsie where each prompt, the command typed at it, and that command's output
+    # begin. Its copy tools read nothing else — without these they fall back to guessing from what
+    # was typed. A prompt theme that already emits them just marks twice, which is harmless: the
+    # terminal keeps one group per row either way.
+    if (( ${TERMSIE_MARKS:-0} )); then
+        __termsie_mark_precmd() {
+            print -nr -- $'\\e]133;D\\a\\e]133;A\\a'
+            # B belongs at the very end of the prompt, so it has to ride on PS1 — and the check
+            # runs every prompt because a theme is free to rebuild PS1 from scratch each time.
+            [[ $PS1 == *$'\\e]133;B\\a'* ]] || PS1=$PS1$'%{\\e]133;B\\a%}'
+            return 0
+        }
+        __termsie_mark_preexec() {
+            print -nr -- $'\\e]133;C\\a'
+            return 0
+        }
+        # Appended after the startup-command hook above, so anything a terminal was told to run
+        # lands before the first marked prompt rather than inside it.
+        typeset -ga preexec_functions
+        precmd_functions+=( __termsie_mark_precmd )
+        preexec_functions+=( __termsie_mark_preexec )
+    fi
 
     # ------------------------------------------------------ merge back on exit
     __termsie_merge_history() {

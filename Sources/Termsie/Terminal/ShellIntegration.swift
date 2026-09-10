@@ -105,16 +105,19 @@ enum ShellIntegration {
         let name = (shell as NSString).lastPathComponent
         let wantsHistory = isolateHistory && config.history.isolate
         let wantsCommands = !commands.isEmpty && config.startupCommands.mode.lowercased() == "shim"
-        guard wantsHistory || wantsCommands else { return plan }
+        // Marks alone are reason enough to shim: they are what the copy tools read, and a
+        // terminal with history isolation turned off still wants working copy buttons.
+        let wantsMarks = config.copy.commandMarks
+        guard wantsHistory || wantsCommands || wantsMarks else { return plan }
 
         switch name {
         case "zsh":
             return zshPlan(paneKey: paneKey, commands: commands, wantsHistory: wantsHistory,
-                           wantsCommands: wantsCommands, config: config,
+                           wantsCommands: wantsCommands, wantsMarks: wantsMarks, config: config,
                            inheritedEnv: inheritedEnv, base: plan)
         case "bash":
             return bashPlan(paneKey: paneKey, commands: commands, wantsHistory: wantsHistory,
-                            wantsCommands: wantsCommands, config: config,
+                            wantsCommands: wantsCommands, wantsMarks: wantsMarks, config: config,
                             inheritedEnv: inheritedEnv, base: plan)
         case "fish":
             return fishPlan(paneKey: paneKey, commands: commands, wantsHistory: wantsHistory,
@@ -131,7 +134,7 @@ enum ShellIntegration {
     // MARK: zsh
 
     private static func zshPlan(paneKey: String, commands: [String], wantsHistory: Bool,
-                                wantsCommands: Bool, config: TermsieConfig,
+                                wantsCommands: Bool, wantsMarks: Bool, config: TermsieConfig,
                                 inheritedEnv: [String: String], base: Plan) -> Plan {
         var plan = base
         let dir: URL
@@ -157,6 +160,7 @@ enum ShellIntegration {
             if let size = config.history.size { plan.environment["TERMSIE_HISTSIZE"] = String(size) }
             if let save = config.history.saveSize { plan.environment["TERMSIE_SAVEHIST"] = String(save) }
         }
+        if wantsMarks { plan.environment["TERMSIE_MARKS"] = "1" }
         if wantsCommands {
             plan.environment["TERMSIE_STARTUP_COUNT"] = String(commands.count)
             for (i, cmd) in commands.enumerated() {
@@ -172,7 +176,7 @@ enum ShellIntegration {
     // MARK: bash
 
     private static func bashPlan(paneKey: String, commands: [String], wantsHistory: Bool,
-                                 wantsCommands: Bool, config: TermsieConfig,
+                                 wantsCommands: Bool, wantsMarks: Bool, config: TermsieConfig,
                                  inheritedEnv: [String: String], base: Plan) -> Plan {
         var plan = base
         plan.mode = .bash
@@ -194,6 +198,15 @@ enum ShellIntegration {
                 .map { "eval '\($0)'" }.joined(separator: "; ")
             hooks.append("if [ -z \"$__TERMSIE_RAN\" ]; then __TERMSIE_RAN=1; \(encoded); fi")
             plan.runsStartupCommands = true
+        }
+        if wantsMarks {
+            // A prompt start before every prompt, and the input mark appended to PS1 once.
+            //
+            // Deliberately no C or D: bash has no preexec, so the only way to emit them is a
+            // DEBUG trap, which would silently replace whatever the user has on it. Leaving them
+            // out is also what tells Termsie this shell says nothing about commands starting and
+            // ending, so it watches the pty's foreground process instead of guessing from marks.
+            hooks.append(#"printf '\033]133;A\007'; case "$PS1" in *'133;B'*) ;; *) PS1="$PS1\[\e]133;B\a\]" ;; esac"#)
         }
         guard !hooks.isEmpty else { return base }
         var prompt = hooks.joined(separator: "; ")

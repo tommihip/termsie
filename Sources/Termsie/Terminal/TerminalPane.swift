@@ -119,6 +119,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
             guard let self else { return }
             self.controller?.closePane(self, force: true)
         }
+        terminalView.foregroundJobRunning = { [weak self] in self?.hasRunningJob ?? false }
         terminalView.broadcastTargets = { [weak self] in
             guard let self, let controller = self.controller else { return [] }
             return controller.broadcastTargets(from: self)
@@ -621,8 +622,67 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
 
     func clearScrollback() {
         terminalView.getTerminal().clearScrollback()
+        terminalView.resetCopyAnchors()
         if !hasExited { terminalView.send(txt: "\u{0C}") }
         thumbnailDirty = true
+    }
+
+    // MARK: Copy
+
+    /// The four things the copy tools can put on the clipboard, and where each gets its text.
+    enum CopyTarget: String, CaseIterable {
+        case selection
+        case lastCommandOutput
+        case wholeTerminal
+        case lastCommand
+
+        var title: String {
+            switch self {
+            case .selection: return "Copy Selection"
+            case .lastCommandOutput: return "Copy Last Command Output"
+            case .wholeTerminal: return "Copy Whole Terminal"
+            case .lastCommand: return "Copy Last Command"
+            }
+        }
+
+        /// What the tool does, for the tooltip on its button.
+        var detail: String {
+            switch self {
+            case .selection: return "Copies the highlighted text."
+            case .lastCommandOutput:
+                return "Copies the last command with its prompt and everything it printed, whether it has finished or is still running."
+            case .wholeTerminal: return "Copies everything the terminal is holding, back to the last clear."
+            case .lastCommand: return "Copies just the command line, without the prompt in front of it."
+            }
+        }
+    }
+
+    /// A terminal whose shell has exited is still worth copying out of, so nothing here asks
+    /// whether it is still running.
+    func canCopy(_ target: CopyTarget) -> Bool {
+        let availability = terminalView.copyAvailability
+        switch target {
+        case .selection: return availability.selection
+        case .lastCommandOutput: return availability.lastCommandOutput
+        case .wholeTerminal: return availability.everything
+        case .lastCommand: return availability.lastCommand
+        }
+    }
+
+    /// Puts one of the copy targets on the clipboard. False means there was nothing to copy,
+    /// which the caller turns into a beep rather than a silently empty clipboard.
+    @discardableResult
+    func copy(_ target: CopyTarget) -> Bool {
+        let text: String?
+        switch target {
+        case .selection: text = terminalView.getSelection()
+        case .lastCommandOutput: text = terminalView.lastCommandBlockText()
+        case .wholeTerminal: text = terminalView.wholeTerminalText()
+        case .lastCommand: text = terminalView.lastCommandText()
+        }
+        guard let text, !text.isEmpty else { return false }
+        TermsieTerminalView.writeToClipboard(text)
+        return true
     }
 
     /// Types commands into an already-running shell, for "Apply now" in the settings editor.

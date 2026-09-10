@@ -59,6 +59,13 @@ enum MainMenu {
         edit.addItem(item("Paste", #selector(NSText.paste(_:)), "v"))
         edit.addItem(item("Select All", #selector(NSText.selectAll(_:)), "a"))
         edit.addItem(.separator())
+        // Titles come from the targets themselves, so the menu and the tools in the terminal list
+        // cannot drift apart.
+        edit.addItem(item(TerminalPane.CopyTarget.lastCommandOutput.title, #selector(TerminalWindowController.copyLastCommandOutput(_:)), "c", [.command, .shift]))
+        edit.addItem(item(TerminalPane.CopyTarget.lastCommand.title, #selector(TerminalWindowController.copyLastCommand(_:)), "c", [.command, .option]))
+        edit.addItem(item(TerminalPane.CopyTarget.wholeTerminal.title, #selector(TerminalWindowController.copyWholeTerminal(_:)), "c", [.command, .control]))
+        edit.addItem(item("Auto-Copy Selection", #selector(TerminalWindowController.toggleAutoCopyOnSelect(_:)), "c", [.command, .option, .shift]))
+        edit.addItem(.separator())
         edit.addItem(item("Find…", #selector(TerminalWindowController.showFind(_:)), "f"))
         edit.addItem(item("Find Next", #selector(TerminalWindowController.findNext(_:)), "g"))
         edit.addItem(item("Find Previous", #selector(TerminalWindowController.findPrevious(_:)), "g", [.command, .shift]))

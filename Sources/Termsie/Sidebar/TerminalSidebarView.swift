@@ -10,6 +10,8 @@ protocol TerminalSidebarDelegate: AnyObject {
     func sidebarDidReorder()
     func sidebarDidRequestNew()
     func sidebarDidSetEnvironment(_ environment: String?, for id: String)
+    func sidebarDidRequestCopy(_ target: TerminalPane.CopyTarget)
+    func sidebarDidToggleAutoCopy()
 }
 
 /// The PowerPoint-style list of terminals down the left of the window.
@@ -22,6 +24,7 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
     private let scrollView = NSScrollView()
     private let tableView = NSTableView()
     private let footer = SidebarFooterView()
+    private let copyTools = SidebarCopyToolsView()
     private var sources: [String: ThumbnailSource] = [:]
     private var refreshTimer: Timer?
     private var quietTicks = 0
@@ -59,6 +62,9 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
         addSubview(scrollView)
         footer.onAdd = { [weak self] in self?.delegate?.sidebarDidRequestNew() }
         addSubview(footer)
+        copyTools.onAction = { [weak self] target in self?.delegate?.sidebarDidRequestCopy(target) }
+        copyTools.onToggleAutoCopy = { [weak self] in self?.delegate?.sidebarDidToggleAutoCopy() }
+        addSubview(copyTools)
 
         NotificationCenter.default.addObserver(self, selector: #selector(scrolled),
                                                name: NSView.boundsDidChangeNotification,
@@ -78,8 +84,35 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
         layer?.backgroundColor = NSColor.hex(ConfigStore.shared.config.colors.sidebarBackground).cgColor
         let footerH = SidebarFooterView.height
         footer.frame = NSRect(x: 0, y: 0, width: bounds.width, height: footerH)
-        scrollView.frame = NSRect(x: 0, y: footerH, width: bounds.width,
-                                  height: max(0, bounds.height - footerH))
+        // The tools sit directly above the New Terminal button, so the whole bottom of the panel
+        // is the things you do rather than the things you have.
+        copyTools.isHidden = !ConfigStore.shared.config.copy.showTools
+        let toolsH = copyTools.isHidden ? 0 : SidebarCopyToolsView.height
+        copyTools.frame = NSRect(x: 0, y: footerH, width: bounds.width, height: toolsH)
+        let below = footerH + toolsH
+        scrollView.frame = NSRect(x: 0, y: below, width: bounds.width,
+                                  height: max(0, bounds.height - below))
+    }
+
+    // MARK: Copy tools
+
+    /// Re-reads what the active terminal can currently copy. Called whenever the terminal, its
+    /// selection, or its output changes, so a button is never offered with nothing behind it.
+    func refreshCopyTools(for pane: TerminalPane?) {
+        copyTools.autoCopyOn = ConfigStore.shared.config.copy.autoCopyOnSelect
+        // Laying out again is what picks up the tools being hidden or shown in settings; the
+        // list above them has to give the space back.
+        if copyTools.isHidden == ConfigStore.shared.config.copy.showTools { needsLayout = true }
+        guard let pane else {
+            copyTools.enabledTargets = []
+            return
+        }
+        copyTools.enabledTargets = Set(TerminalPane.CopyTarget.allCases.filter { pane.canCopy($0) })
+    }
+
+    /// Flashes the row a copy came from, or beeps when it found nothing.
+    func confirmCopy(_ target: TerminalPane.CopyTarget, copied: Bool) {
+        copyTools.confirm(target, copied: copied)
     }
 
     // MARK: Refresh

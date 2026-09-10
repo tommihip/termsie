@@ -108,6 +108,28 @@ struct TermsieConfig: Codable, Equatable {
         }
     }
 
+    /// The copy tools in the terminal list, and what they act on.
+    struct Copy: Codable, Equatable {
+        /// Put a mouse selection on the clipboard the moment it is made.
+        var autoCopyOnSelect = false
+        /// Show the copy tools above the New Terminal button.
+        var showTools = true
+        /// Ask the shell to mark where each prompt, command and its output begin (OSC 133).
+        /// Without this the command buttons fall back to what Termsie saw you type.
+        var commandMarks = true
+        /// Drop the trailing blank lines and right-hand padding a terminal grid always has.
+        var trimCopiedText = true
+
+        init() {}
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            autoCopyOnSelect = try c.decodeIfPresent(Bool.self, forKey: .autoCopyOnSelect) ?? autoCopyOnSelect
+            showTools = try c.decodeIfPresent(Bool.self, forKey: .showTools) ?? showTools
+            commandMarks = try c.decodeIfPresent(Bool.self, forKey: .commandMarks) ?? commandMarks
+            trimCopiedText = try c.decodeIfPresent(Bool.self, forKey: .trimCopiedText) ?? trimCopiedText
+        }
+    }
+
     struct Sidebar: Codable, Equatable {
         var visible = true
         var width: Double = 264
@@ -190,6 +212,7 @@ struct TermsieConfig: Codable, Equatable {
     var shellIntegration = "auto"
     var history = History()
     var startupCommands = StartupCommands()
+    var copy = Copy()
     var sidebar = Sidebar()
     /// When the window is resized, scale the terminals with it. Off means they keep their size
     /// and position and only stay reachable inside the smaller window.
@@ -227,6 +250,7 @@ struct TermsieConfig: Codable, Equatable {
         shellIntegration = try c.decodeIfPresent(String.self, forKey: .shellIntegration) ?? shellIntegration
         history = try c.decodeIfPresent(History.self, forKey: .history) ?? history
         startupCommands = try c.decodeIfPresent(StartupCommands.self, forKey: .startupCommands) ?? startupCommands
+        copy = try c.decodeIfPresent(Copy.self, forKey: .copy) ?? copy
         sidebar = try c.decodeIfPresent(Sidebar.self, forKey: .sidebar) ?? sidebar
         resizeTerminalsWithWindow = try c.decodeIfPresent(Bool.self, forKey: .resizeTerminalsWithWindow) ?? resizeTerminalsWithWindow
         snapToCells = try c.decodeIfPresent(Bool.self, forKey: .snapToCells) ?? snapToCells

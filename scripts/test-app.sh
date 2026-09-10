@@ -296,5 +296,78 @@ fix=$ROOT/settings; mkdir -p $fix
 out=$(run $fix "wait,showTerminalSettings,wait" --cwd $HOME)
 check "app survived opening the settings popover" "$(print -r -- "$out" | grep 'DebugDriver: wrote')"
 
+print "\n== the copy tools read whole commands out of the buffer"
+clip() { print -r -- "$1" | grep 'DebugDriver clipboard:' | sed -n "${2:-1}p" }
+
+fix=$ROOT/copy-zsh; mkdir -p $fix/termsie
+print '{}' > $fix/termsie/config.json
+out=$(run $fix "wait,type:echo copied-by-termsie\n,wait,wait,dumpCopyState,copy:lastCommandOutput,dumpClipboard,copy:lastCommand,dumpClipboard" --cwd $HOME)
+check "zsh reports its prompts and commands"   "$(print -r -- "$out" | grep 'copyState:.*marks=true')"
+check "the command's prompt and output copied" "$(clip "$out" 1 | grep 'echo copied-by-termsie.*copied-by-termsie')"
+check "the command alone copied"               "$(clip "$out" 2 | grep -F '[echo copied-by-termsie]')"
+
+print "\n== a command that is still running is the one that gets copied"
+fix=$ROOT/copy-running; mkdir -p $fix
+out=$(run $fix "wait,type:echo done-already\n,wait,type:echo now-running; sleep 8\n,wait,wait,dumpCopyState,copy:lastCommandOutput,dumpClipboard" --cwd $HOME)
+check "the shell says a command is running" "$(print -r -- "$out" | grep 'copyState:.*lifecycle=running')"
+check "the running command is copied, not the finished one" \
+      "$(clip "$out" 1 | grep 'now-running' )"
+
+print "\n== copying everything stops at the last clear"
+fix=$ROOT/copy-clear; mkdir -p $fix
+out=$(run $fix "wait,type:echo BEFORETHECLEAR\n,wait,type:clear\n,wait,type:echo AFTERTHECLEAR\n,wait,wait,copy:wholeTerminal,dumpClipboard" --cwd $HOME)
+check "content after the clear is copied"    "$(clip "$out" 1 | grep 'AFTERTHECLEAR')"
+check "content before the clear is left out" "$(clip "$out" 1 | grep -v 'BEFORETHECLEAR')"
+
+fix=$ROOT/copy-ctrl-l; mkdir -p $fix
+ctrl_l=$(printf '\014')
+out=$(run $fix "wait,type:echo BEFORECTRLL\n,wait,wait,type:${ctrl_l},wait,wait,type:echo AFTERCTRLL\n,wait,wait,copy:wholeTerminal,dumpClipboard" --cwd $HOME)
+# Ctrl-L keeps the scrollback, unlike `clear`, so this is the case that needs the floor.
+check "Ctrl-L also starts a fresh copy"       "$(clip "$out" 1 | grep 'AFTERCTRLL')"
+check "what Ctrl-L scrolled away is left out" "$(clip "$out" 1 | grep -v 'BEFORECTRLL')"
+
+print "\n== the copy tools still work in a shell that marks nothing"
+fix=$ROOT/copy-bare; mkdir -p $fix/termsie
+print '{"shellIntegration":"off"}' > $fix/termsie/config.json
+out=$(run $fix "wait,type:echo unmarked-shell\n,wait,wait,dumpCopyState,copy:lastCommandOutput,dumpClipboard,copy:lastCommand,dumpClipboard" --cwd $HOME)
+check "no marks are claimed"                "$(print -r -- "$out" | grep 'copyState:.*marks=false')"
+check "the typed line still anchors a copy" "$(clip "$out" 1 | grep 'echo unmarked-shell.*unmarked-shell')"
+check "and the command alone comes out"     "$(clip "$out" 2 | grep -F '[echo unmarked-shell]')"
+
+print "\n== bash marks its prompts, and its prompt stays out of the command"
+fix=$ROOT/copy-bash; mkdir -p $fix/termsie
+print '{"shell":"/bin/bash","shellArgs":[]}' > $fix/termsie/config.json
+out=$(run $fix "wait,type:echo from-bash\n,wait,wait,dumpCopyState,copy:lastCommand,dumpClipboard" --cwd $HOME)
+check "bash reports prompts but not commands" "$(print -r -- "$out" | grep 'copyState:.*marks=true lifecycle=atPrompt lifecycleMarks=false')"
+check "the bash prompt is not copied with the command" "$(clip "$out" 1 | grep -F '[echo from-bash]')"
+
+print "\n== a selection survives output arriving under it"
+# SwiftTerm drops the selection on every feed while mouse reporting is on; without Termsie's
+# own anchoring, highlighted text vanishes the moment the next line lands.
+fix=$ROOT/selection; mkdir -p $fix/termsie
+print '{"scrollback":40}' > $fix/termsie/config.json
+out=$(run $fix 'wait,type:for i in $(seq 1 100); do echo filler-$i; done\n,wait,wait,select:10x0x10x11,dumpSelection,type:for i in $(seq 200 240); do echo more-$i; done\n,wait,wait,dumpSelection' --cwd $HOME)
+before=$(print -r -- "$out" | grep 'DebugDriver selection:' | sed -n 1p | sed -nE 's/.*text=\[(.*)\].*/\1/p')
+after=$(print -r -- "$out" | grep 'DebugDriver selection:' | sed -n 2p | sed -nE 's/.*text=\[(.*)\].*/\1/p')
+check "something was selected to begin with" "$([[ -n "$before" ]] && echo yes)"
+check "the same text is still selected after 40 more lines scrolled past (was [$before], now [$after])" \
+      "$([[ -n "$before" && "$before" == "$after" ]] && echo yes)"
+
+print "\n== a selection trimmed out of the scrollback is dropped, not left pointing elsewhere"
+fix=$ROOT/selection-trim; mkdir -p $fix/termsie
+print '{"scrollback":2}' > $fix/termsie/config.json
+out=$(run $fix 'wait,type:echo PINNEDMARKER\n,wait,wait,select:1x0x1x13,dumpSelection,type:for i in $(seq 1 200); do echo filler-$i; done\n,wait,wait,dumpSelection' --cwd $HOME)
+check "the selection is gone once its text is" \
+      "$(print -r -- "$out" | grep 'DebugDriver selection:' | sed -n 2p | grep 'active=false')"
+
+print "\n== auto-copy on select is a real setting, wired to the real gesture"
+fix=$ROOT/autocopy; mkdir -p $fix
+out=$(run $fix "wait,type:echo AUTOCOPYTARGET\n,wait,wait,select:1x0x1x16,autoCopyNow,dumpCopyState,toggleAutoCopyOnSelect,dumpCopyState,autoCopyNow,dumpClipboard" --cwd $HOME)
+check "off by default"                 "$(print -r -- "$out" | grep 'copyState:.*autoCopy=false')"
+check "the menu item turns it on"      "$(print -r -- "$out" | grep 'copyState:.*autoCopy=true')"
+check "nothing is copied while it is off" "$(print -r -- "$out" | grep 'autoCopy: copied=false')"
+check "the selection is copied once it is on" "$(clip "$out" 1 | grep 'AUTOCOPYTARGET')"
+check "the choice is written to config.json" "$(grep -s 'autoCopyOnSelect' $fix/termsie/config.json | grep true)"
+
 print ""
 if (( fail )); then print "APP TESTS FAILED"; exit 1; else print "all app tests passed"; fi

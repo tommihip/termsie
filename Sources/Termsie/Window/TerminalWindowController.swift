@@ -252,6 +252,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     func paneProducedOutput(_ pane: TerminalPane) {
         sidebar.kickTimer()
+        if pane === activePane { refreshCopyTools() }
     }
 
     private func stateChanged() {
@@ -267,6 +268,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             activePane = nil
             sidebar.activeID = nil
             sidebar.reloadAll()
+            refreshCopyTools()
             updateWindowTitle()
             return
         }
@@ -279,6 +281,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         pane.focusTerminal()
         sidebar.activeID = pane.definitionID
         sidebar.reloadAll()
+        refreshCopyTools()
         updateWindowTitle()
     }
 
@@ -290,6 +293,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         canvas.raise(pane)
         sidebar.activeID = pane.definitionID
         sidebar.reloadAll()
+        refreshCopyTools()
         updateWindowTitle()
     }
 
@@ -389,6 +393,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         applyFont()
         for id in registry.order { sidebar.dropCache(for: id) }
         sidebar.reloadAll()
+        refreshCopyTools()
         sidebar.refreshVisibleThumbnails(force: true)
         canvas.needsDisplay = true
         container.needsDisplay = true
@@ -401,6 +406,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         container.sidebarVisible = visible
         if visible {
             sidebar.reloadAll()
+            refreshCopyTools()
             sidebar.refreshVisibleThumbnails(force: true)
         }
         stateChanged()
@@ -558,6 +564,19 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         setEnvironment(environment, for: id)
     }
 
+    func sidebarDidRequestCopy(_ target: TerminalPane.CopyTarget) {
+        let copied = performCopy(target)
+        sidebar.confirmCopy(target, copied: copied)
+        // A copy from the list must not steal focus from the terminal it copied out of.
+        activePane?.focusTerminal()
+    }
+
+    func sidebarDidToggleAutoCopy() {
+        ConfigStore.shared.update { $0.copy.autoCopyOnSelect.toggle() }
+        refreshCopyTools()
+        activePane?.focusTerminal()
+    }
+
     func sidebarDidReorder() {
         renumber()
         sidebar.reloadAll()
@@ -705,7 +724,36 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         guard idx >= 0, idx < group.windows.count else { return }
         group.selectedWindow = group.windows[idx]
     }
-    @objc func clearScrollback(_ sender: Any?) { activePane?.clearScrollback() }
+    @objc func clearScrollback(_ sender: Any?) {
+        activePane?.clearScrollback()
+        refreshCopyTools()
+    }
+
+    // MARK: Copy
+
+    /// Runs one copy against the focused terminal. False means it found nothing to copy.
+    @discardableResult
+    func performCopy(_ target: TerminalPane.CopyTarget) -> Bool {
+        guard let pane = activePane else { return false }
+        let copied = pane.copy(target)
+        refreshCopyTools()
+        return copied
+    }
+
+    /// Re-reads what the focused terminal can copy right now and repaints the tools.
+    func refreshCopyTools() {
+        sidebar?.refreshCopyTools(for: activePane)
+    }
+
+    private func copyFromMenu(_ target: TerminalPane.CopyTarget) {
+        let copied = performCopy(target)
+        sidebar.confirmCopy(target, copied: copied)
+    }
+
+    @objc func copyLastCommandOutput(_ sender: Any?) { copyFromMenu(.lastCommandOutput) }
+    @objc func copyWholeTerminal(_ sender: Any?) { copyFromMenu(.wholeTerminal) }
+    @objc func copyLastCommand(_ sender: Any?) { copyFromMenu(.lastCommand) }
+    @objc func toggleAutoCopyOnSelect(_ sender: Any?) { sidebarDidToggleAutoCopy() }
     @objc func showFind(_ sender: Any?) { activePane?.showFindBar() }
     @objc func findNext(_ sender: Any?) { activePane?.findNext() }
     @objc func findPrevious(_ sender: Any?) { activePane?.findPrevious() }
@@ -879,6 +927,15 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         case #selector(toggleSidebar(_:)):
             item.state = container.sidebarVisible ? .on : .off
             return true
+        case #selector(toggleAutoCopyOnSelect(_:)):
+            item.state = ConfigStore.shared.config.copy.autoCopyOnSelect ? .on : .off
+            return true
+        case #selector(copyLastCommandOutput(_:)):
+            return activePane?.canCopy(.lastCommandOutput) ?? false
+        case #selector(copyLastCommand(_:)):
+            return activePane?.canCopy(.lastCommand) ?? false
+        case #selector(copyWholeTerminal(_:)):
+            return activePane?.canCopy(.wholeTerminal) ?? false
         case #selector(increaseFontSize(_:)), #selector(decreaseFontSize(_:)), #selector(resetFontSize(_:)):
             return activePane != nil
         case #selector(closeActivePane(_:)), #selector(clearScrollback(_:)), #selector(showFind(_:)),
