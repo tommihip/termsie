@@ -39,7 +39,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private init() {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 430),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Termsie Settings"
         window.appearance = NSAppearance(named: .darkAqua)
@@ -64,6 +64,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
         reloadAll()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        // Otherwise AppKit hands first responder to the first text field on the General tab, and
+        // the window opens with a focus ring around a number nobody asked to edit.
+        window?.makeFirstResponder(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -71,6 +74,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
     @discardableResult
     func clickGeneralSetting(_ title: String) -> Bool { generalForm.clickCheckbox(titled: title) }
     func generalSettingState(_ title: String) -> Bool? { generalForm.checkboxState(titled: title) }
+    @discardableResult
+    func setGeneralNumber(_ title: String, to value: Double) -> Bool { generalForm.setNumber(titled: title, to: value) }
+    func generalNumberState(_ title: String) -> Double? { generalForm.numberState(titled: title) }
 
     func showEnvironments() {
         show()
@@ -122,10 +128,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
     }
 
     /// Global behaviour that is not about a single terminal. New settings go here as one
-    /// `checkbox` call each.
+    /// `checkbox` or `number` call each.
+    ///
+    /// The form is the document of a scroll view rather than the tab itself, so adding a setting
+    /// never has to be weighed against the window's height.
     private func buildGeneralTab() -> NSView {
-        generalForm.frame = NSRect(x: 0, y: 0, width: 520, height: 360)
-        generalForm.autoresizingMask = [.width, .height]
+        generalForm.frame = NSRect(x: 0, y: 0, width: 508, height: 360)
+        generalForm.autoresizingMask = [.width]
 
         generalForm.section("Window")
         generalForm.checkbox("Resize terminals with the window", \.resizeTerminalsWithWindow,
@@ -142,6 +151,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
         generalForm.checkbox("Ask before closing a terminal that is running something",
                              \.confirmClosingRunningProcess)
 
+        generalForm.section("Text")
+        generalForm.number("Padding around the text", \.terminalPadding,
+                           range: 0...TermsieConfig.maxPadding, suffix: "pt",
+                           hint: "Blank margin between a terminal's border and the first character. Individual terminals can override this in their own settings.")
+        generalForm.checkbox("Wrap long lines", \.lineWrap,
+                             hint: "Off, a terminal keeps a fixed, wider grid however narrow the pane is, and scrolls sideways instead of folding a long line onto the next row.")
+        generalForm.number("Columns when lines are not wrapped", \.unwrappedColumnsValue,
+                           range: Double(TermsieConfig.minUnwrappedColumns)...Double(TermsieConfig.maxUnwrappedColumns),
+                           step: 10, isInteger: true, suffix: "cols",
+                           hint: "The width an unwrapped terminal reports to the shell. Anything past it is still discarded, because that is what a terminal does — so this is how far right you can scroll.")
+
         generalForm.section("Copying")
         generalForm.checkbox("Copy a selection as soon as it is made", \.copy.autoCopyOnSelect,
                              hint: "Dragging over text, double-clicking a word or triple-clicking a line puts it straight on the clipboard.")
@@ -150,7 +170,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
                              hint: "Copying one command and its output needs the shell to say where each prompt starts. Off, Termsie falls back to the line it saw you type. Takes effect in terminals opened afterwards.")
         generalForm.checkbox("Trim blank space from copied text", \.copy.trimCopiedText,
                              hint: "Drops the padding a terminal grid puts at the end of every row, and the blank screen below the last line.")
-        return generalForm
+
+        generalForm.frame.size.height = generalForm.contentHeight
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 360))
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.documentView = generalForm
+        return scroll
     }
 
     private func buildFontTab() -> NSView {

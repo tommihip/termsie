@@ -597,6 +597,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             if pane.customTitle != def.name { pane.customTitle = def.name }
             pane.applyEnvironment()
             pane.applyFont()
+            pane.applyTextLayout()
         }
         sidebar?.reloadRow(id)
     }

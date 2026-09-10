@@ -47,8 +47,8 @@ again.
 | **Workspaces** | Save a whole window of terminals to a file. New, Save, Save As, and a prompt before you throw away unsaved changes. |
 | **Genuinely native** | Swift and AppKit, GPU text rendering through Metal, translucency and blur like Terminal.app. No Electron, no web view. |
 
-Plus native tabs, input broadcast to every terminal at once, scrollback search, per-terminal font
-overrides, and a config file that reloads the moment you save it.
+Plus native tabs, input broadcast to every terminal at once, scrollback search, per-terminal font,
+padding and line-wrapping overrides, and a config file that reloads the moment you save it.
 
 ## Requirements
 
@@ -199,6 +199,9 @@ Every key is optional.
   "blurBackground": true,
   "cornerRadius": 10,
   "trafficLights": true,
+  "terminalPadding": 0,
+  "lineWrap": true,
+  "unwrappedColumns": 200,
   "environments": [
     { "id": "development", "label": "Development", "tint": "#61afef" },
     { "id": "staging",     "label": "Staging",     "tint": "#e5c07b" },
@@ -237,12 +240,24 @@ Every key is optional.
 - `opacity`: how solid a terminal's background is. `activeOpacityBoost` is added to whichever
   terminal has focus; set it to `0` for uniform opacity. Set `opacity` to `1` and `blurBackground`
   to `false` for a fully opaque window.
+- `terminalPadding` (also in Settings ▸ General): blank margin in points between a terminal's
+  border and its text. A terminal can override it in its own settings.
+- `lineWrap` (also in Settings ▸ General): with `false` a terminal keeps a fixed grid
+  `unwrappedColumns` wide however narrow the pane is, and a horizontal scrollbar appears whenever
+  the text on screen runs past the right edge. Typing scrolls the caret back into view, and a
+  sideways trackpad swipe or ⇧-scroll moves the view. A terminal emulator still discards anything
+  past its last column, so `unwrappedColumns` is both the width programs lay out to and how far
+  right you can scroll. Individual terminals can override `lineWrap`.
 - `environments`: your own list, in menu order. A `tint` of `null` means no colour; `strength` is
   how far the background is pulled toward the tint.
 - `shellIntegration`: `"off"` disables the history, startup-command and command-mark machinery
   entirely, and terminals launch exactly as a plain shell would.
-- `copy.autoCopyOnSelect`: put every mouse selection on the clipboard as soon as it is made.
-  Same switch as the one at the top of the copy tools.
+- `copy.autoCopyOnSelect` (also in Settings ▸ General): put every mouse selection on the clipboard
+  as soon as it is made. The settings checkbox, the switch at the top of the copy tools and ⌥⇧⌘C
+  are all the same setting.
+- `copy.showTools` (also in Settings ▸ General): show the copy tools above **New Terminal**.
+  Hiding them changes nothing about the copy shortcuts (⇧⌘C, ⌃⌘C, ⌥⌘C, ⌥⇧⌘C) or the **Edit** menu
+  items, which work either way.
 - `copy.commandMarks`: ask the shell to say where each prompt, command and output begins. See
   [Copying a command, not a rectangle](#copying-a-command-not-a-rectangle).
 - `copy.trimCopiedText`: drop the right-hand padding a terminal grid puts on every row, and the
@@ -288,8 +303,9 @@ while adding, closing, renaming, moving and resizing terminals all count.
 
 `frame` is `[x, y, width, height]` as fractions of the window, measured from the top left, so a
 workspace saved on a large display still opens sensibly on a laptop. `z` is the stacking order.
-`openOnRestore: false` keeps a terminal in the list without starting it. `fontFamily` and
-`fontSize` override the global font for that terminal alone. See `examples/workspace.json`.
+`openOnRestore: false` keeps a terminal in the list without starting it. `fontFamily`, `fontSize`,
+`padding` and `lineWrap` override the corresponding global setting for that terminal alone; leave
+one out to inherit it. See `examples/workspace.json`.
 
 Older files that used the original nested split-tree format still open; their panes become floating
 terminals in the same positions. `examples/legacy-v1-workspace.json` is one.

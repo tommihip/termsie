@@ -200,6 +200,16 @@ struct TermsieConfig: Codable, Equatable {
     var blurBackground = true
     /// Corner radius of each floating terminal.
     var cornerRadius: Double = 10
+    /// Blank margin between a terminal's border and its text, in points. Individual terminals
+    /// can override it.
+    var terminalPadding: Double = 0
+    /// Whether a line longer than the terminal is wrapped onto the next row. Off, the grid is
+    /// `unwrappedColumns` wide however narrow the terminal is, and scrolls sideways.
+    var lineWrap: Bool = true
+    /// The column count a terminal reports while `lineWrap` is off. A terminal emulator throws
+    /// away whatever runs past its last column, so "do not wrap" has to mean "be wider than the
+    /// pane and scroll", and this is that width.
+    var unwrappedColumns: Int = 200
     /// Show the red/yellow/green buttons on each terminal.
     var trafficLights = true
     /// Selectable environments. The first is the untinted default.
@@ -243,6 +253,9 @@ struct TermsieConfig: Codable, Equatable {
         activeOpacityBoost = try c.decodeIfPresent(Double.self, forKey: .activeOpacityBoost) ?? activeOpacityBoost
         blurBackground = try c.decodeIfPresent(Bool.self, forKey: .blurBackground) ?? blurBackground
         cornerRadius = try c.decodeIfPresent(Double.self, forKey: .cornerRadius) ?? cornerRadius
+        terminalPadding = try c.decodeIfPresent(Double.self, forKey: .terminalPadding) ?? terminalPadding
+        lineWrap = try c.decodeIfPresent(Bool.self, forKey: .lineWrap) ?? lineWrap
+        unwrappedColumns = try c.decodeIfPresent(Int.self, forKey: .unwrappedColumns) ?? unwrappedColumns
         trafficLights = try c.decodeIfPresent(Bool.self, forKey: .trafficLights) ?? trafficLights
         if let envs = try c.decodeIfPresent([EnvironmentStyle].self, forKey: .environments) {
             environments = envs
@@ -272,6 +285,30 @@ struct TermsieConfig: Codable, Equatable {
         return NSFont(name: name, size: points)
             ?? NSFont(name: font.family, size: points)
             ?? UIFonts.monospaced(size: points, weight: .regular)
+    }
+
+    static let maxPadding: Double = 48
+    static let minUnwrappedColumns = 40
+    static let maxUnwrappedColumns = 2000
+
+    /// The padding for a terminal, given its optional override. `nil` inherits the global value,
+    /// which is what makes changing the global setting move every terminal that has not opted out.
+    func resolvedPadding(_ override: Double?) -> CGFloat {
+        CGFloat(min(max(override ?? terminalPadding, 0), Self.maxPadding))
+    }
+
+    /// Whether a terminal wraps, given its optional override.
+    func resolvedLineWrap(_ override: Bool?) -> Bool { override ?? lineWrap }
+
+    var resolvedUnwrappedColumns: Int {
+        min(max(unwrappedColumns, Self.minUnwrappedColumns), Self.maxUnwrappedColumns)
+    }
+
+    /// `unwrappedColumns` seen as a Double, so the settings form needs only one numeric binding.
+    /// Computed, so it stays out of `CodingKeys` and never reaches config.json.
+    var unwrappedColumnsValue: Double {
+        get { Double(unwrappedColumns) }
+        set { unwrappedColumns = Int(newValue.rounded()) }
     }
 
     var resolvedShell: String {

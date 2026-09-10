@@ -369,5 +369,56 @@ check "nothing is copied while it is off" "$(print -r -- "$out" | grep 'autoCopy
 check "the selection is copied once it is on" "$(clip "$out" 1 | grep 'AUTOCOPYTARGET')"
 check "the choice is written to config.json" "$(grep -s 'autoCopyOnSelect' $fix/termsie/config.json | grep true)"
 
+print "\n== padding is a global setting each terminal may override"
+fix=$ROOT/padding; mkdir -p $fix
+out=$(run $fix "newTerminalAction,wait,setGlobalTextLayout:12|1|200,wait,setTextLayout:1|30|,wait,dumpTextLayout" --cwd $HOME)
+check "the global padding reaches an unmodified terminal" \
+      "$(print -r -- "$out" | grep 'textLayout:.*override=\[- -\] padding=12.0')"
+check "an overriding terminal keeps its own padding" \
+      "$(print -r -- "$out" | grep 'textLayout:.*override=\[30 -\] padding=30.0')"
+# The point of padding is that the text box actually shrinks by it, on both sides.
+widths=(${(f)"$(print -r -- "$out" | grep 'textLayout:' | sed -E 's/.*termWidth=([0-9]+) hostWidth=([0-9]+).*/\1 \2/')"})
+narrowed=yes
+for pair in $widths; do
+  tw=${pair%% *}; hw=${pair##* }
+  (( hw - tw >= 24 )) || narrowed=""
+done
+check "the terminal is inset by the padding on both sides ($widths)" "$narrowed"
+
+print "\n== line wrapping is a global setting each terminal may override"
+fix=$ROOT/wrap; mkdir -p $fix
+out=$(run $fix "newTerminalAction,wait,setGlobalTextLayout:0|0|150,wait,setTextLayout:1||1,wait,dumpTextLayout" --cwd $HOME)
+check "an unwrapped terminal takes the configured column count" \
+      "$(print -r -- "$out" | grep 'textLayout:.*override=\[- -\] padding=0.0 wrap=false gridCols=150')"
+check "a terminal can opt back into wrapping" \
+      "$(print -r -- "$out" | grep 'textLayout:.*override=\[- true\].*wrap=true')"
+# A wrapped terminal's grid must still follow its own width, not the unwrapped setting.
+check "the wrapped terminal is not given the unwrapped width" \
+      "$([[ -z "$(print -r -- "$out" | grep 'override=\[- true\].*gridCols=150')" ]] && echo yes)"
+check "the choice is written to config.json" "$(grep -s '"lineWrap"' $fix/termsie/config.json | grep false)"
+
+print "\n== the horizontal scrollbar appears only when text runs past the edge"
+fix=$ROOT/hscroll; mkdir -p $fix/termsie
+print '{"lineWrap":false,"unwrappedColumns":200}' > $fix/termsie/config.json
+out=$(run $fix "newTerminalAction,tileGrid,wait,pane:2,dumpTextLayout,type:echo AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKKKLLLLMMMMNNNNOOOOPPPPQQQQRRRRSSSSTTTT\n,wait,dumpTextLayout,scrollTerminal:9999,wait,dumpTextLayout" --cwd $HOME)
+check "hidden while only a prompt is on screen" \
+      "$(print -r -- "$out" | grep 'DebugDriver textLayout' | sed -n 2p | grep 'hscroll=false')"
+check "shown once a long line lands"  "$(print -r -- "$out" | grep 'hscroll=true')"
+check "scrolling moves the view"      "$(print -r -- "$out" | grep -E 'hscroll=true offset=[1-9][0-9]*')"
+# Scrolling is bounded by the *content*, not by the 200-column grid, so a scroll to the far right
+# still leaves the longest line's tail on screen rather than parking on blank columns.
+offsets=(${(f)"$(print -r -- "$out" | grep -o 'offset=[0-9]*' | cut -d= -f2)"})
+check "the offset stops at the end of the text (${offsets[-1]})" \
+      "$([[ -n "${offsets[-1]:-}" ]] && (( offsets[-1] > 0 && offsets[-1] < 900 )) && echo yes)"
+
+print "\n== the copy tools can be hidden without disarming their shortcuts"
+fix=$ROOT/copytools; mkdir -p $fix
+out=$(run $fix "openSettings,clickSetting:Show the copy tools,wait,type:echo TOOLSHIDDEN\n,wait,toggleAutoCopyOnSelect,dumpCopyState,readSetting:Copy a selection as soon,copy:wholeTerminal,dumpClipboard" --cwd $HOME)
+check "the tools are hidden in config.json" "$(grep -s 'showTools' $fix/termsie/config.json | grep false)"
+check "the auto-copy shortcut still works"  "$(print -r -- "$out" | grep 'copyState:.*autoCopy=true')"
+check "and the general setting shows the same value" \
+      "$(print -r -- "$out" | grep 'readSetting: \[Copy a selection as soon\] shown=true')"
+check "a copy shortcut still copies"        "$(clip "$out" 1 | grep 'TOOLSHIDDEN')"
+
 print ""
 if (( fail )); then print "APP TESTS FAILED"; exit 1; else print "all app tests passed"; fi

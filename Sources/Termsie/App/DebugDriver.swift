@@ -232,6 +232,53 @@ enum DebugDriver {
         } else if action.hasPrefix("removeEnvironment:") {
             let target = String(action.dropFirst(18))
             ConfigStore.shared.update { $0.environments.removeAll { $0.id == target } }
+        } else if action == "dumpTextLayout", let controller {
+            let config = ConfigStore.shared.config
+            NSLog("DebugDriver textLayoutGlobal: padding=\(config.terminalPadding) wrap=\(config.lineWrap) cols=\(config.resolvedUnwrappedColumns)")
+            for id in controller.registry.order {
+                let def = controller.registry.definition(id)
+                guard let pane = controller.registry.pane(for: id) else { continue }
+                let host = pane.scrollHost
+                NSLog("DebugDriver textLayout: id=\(id) override=[\(def?.padding.map { String(format: "%g", $0) } ?? "-") \(def?.lineWrap.map(String.init) ?? "-")]"
+                    + " padding=\(host.padding) wrap=\(host.wrapsLines) gridCols=\(pane.terminalView.getTerminal().cols)"
+                    + " termWidth=\(Int(pane.terminalView.frame.width)) hostWidth=\(Int(host.frame.width))"
+                    + " content=\(host.contentColumns) hscroll=\(host.showsHorizontalScroller) offset=\(Int(host.horizontalOffset))")
+            }
+        } else if action.hasPrefix("setGlobalTextLayout:") {
+            // setGlobalTextLayout:<padding>|<wrap 0|1>|<columns>; an empty field is left alone.
+            let parts = action.dropFirst(20).split(separator: "|", omittingEmptySubsequences: false)
+            if parts.count == 3 {
+                ConfigStore.shared.update {
+                    if let padding = Double(parts[0]) { $0.terminalPadding = padding }
+                    if let wrap = Int(parts[1]) { $0.lineWrap = wrap != 0 }
+                    if let cols = Int(parts[2]) { $0.unwrappedColumns = cols }
+                }
+            }
+        } else if action.hasPrefix("setTextLayout:"), let controller {
+            // setTextLayout:<n>|<padding>|<wrap 0|1>; an empty field clears that override.
+            let parts = action.dropFirst(14).split(separator: "|", omittingEmptySubsequences: false)
+            if parts.count == 3, let n = Int(parts[0]), let id = controller.registry.id(at: n - 1) {
+                controller.registry.mutate(id) {
+                    $0.padding = Double(parts[1])
+                    $0.lineWrap = Int(parts[2]).map { $0 != 0 }
+                }
+            }
+        } else if action.hasPrefix("scrollTerminal:"), let controller {
+            if let delta = Double(action.dropFirst(15)), let pane = controller.activePane {
+                let moved = pane.scrollHost.scrollBy(CGFloat(delta))
+                NSLog("DebugDriver scrollTerminal: moved=\(moved) offset=\(Int(pane.scrollHost.horizontalOffset))")
+            }
+        } else if action.hasPrefix("setNumberSetting:") {
+            // setNumberSetting:<label>|<value>, driving the real settings control.
+            let parts = action.dropFirst(17).split(separator: "|", maxSplits: 1)
+            if parts.count == 2, let value = Double(parts[1]) {
+                let found = SettingsWindowController.shared.setGeneralNumber(String(parts[0]), to: value)
+                NSLog("DebugDriver setNumberSetting: [\(parts[0])] found=\(found)")
+            }
+        } else if action.hasPrefix("readNumberSetting:") {
+            let title = String(action.dropFirst(18))
+            let state = SettingsWindowController.shared.generalNumberState(title)
+            NSLog("DebugDriver readNumberSetting: [\(title)] shown=\(state.map { String(format: "%g", $0) } ?? "-")")
         } else if action.hasPrefix("clickSetting:") {
             let title = String(action.dropFirst(13))
             let clicked = SettingsWindowController.shared.clickGeneralSetting(title)

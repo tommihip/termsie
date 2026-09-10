@@ -24,6 +24,10 @@ struct TerminalDefinition: Codable, Equatable {
     /// Which configured environment this terminal belongs to, tinting its background.
     /// `nil` or an unknown id means the untinted default.
     var environment: String?
+    /// Blank margin between this terminal's border and its text, in points. `nil` inherits.
+    var padding: Double?
+    /// Whether long lines wrap in this terminal. `nil` inherits the global setting.
+    var lineWrap: Bool?
     /// Position on the canvas as `[x, y, width, height]`, fractional 0...1, top-left origin.
     /// Fractional so a layout saved on a large display still opens sensibly on a laptop.
     var frame: [Double]?
@@ -63,6 +67,8 @@ struct TerminalDefinition: Codable, Equatable {
         environment = try c.decodeIfPresent(String.self, forKey: .environment)
         fontFamily = try c.decodeIfPresent(String.self, forKey: .fontFamily)
         fontSize = try c.decodeIfPresent(Double.self, forKey: .fontSize)
+        padding = try c.decodeIfPresent(Double.self, forKey: .padding)
+        lineWrap = try c.decodeIfPresent(Bool.self, forKey: .lineWrap)
         z = try c.decodeIfPresent(Int.self, forKey: .z) ?? 0
         openOnRestore = try c.decodeIfPresent(Bool.self, forKey: .openOnRestore) ?? true
         if let f = try c.decodeIfPresent([Double].self, forKey: .frame), f.count == 4,

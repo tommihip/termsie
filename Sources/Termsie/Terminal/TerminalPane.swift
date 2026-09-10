@@ -9,6 +9,9 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     /// Identity shared with the sidebar row, the saved definition, and the shell history file.
     let definitionID: String
     let terminalView: TermsieTerminalView
+    /// Wraps the terminal so it can be inset by the padding setting and slid sideways when this
+    /// terminal does not wrap its lines.
+    let scrollHost: TerminalScrollHost
     let header = PaneHeaderView()
     /// Holds the header and terminal, rounded and clipped. The shadow has to live on the outer
     /// view instead, because a layer cannot both clip its content and cast a shadow.
@@ -82,6 +85,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
             frame: NSRect(x: 0, y: 0, width: 400, height: 300),
             font: config.resolvedFont(family: definition.fontFamily, size: definition.fontSize),
             options: options)
+        scrollHost = TerminalScrollHost(terminalView: terminalView)
         super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         initialDirectory = definition.cwd
         startupCommands = definition.commands(isReopen: isReopen)
@@ -105,8 +109,8 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         header.pane = self
         content.addSubview(header)
         terminalView.processDelegate = self
-        terminalView.autoresizingMask = []
-        content.addSubview(terminalView)
+        scrollHost.autoresizingMask = []
+        content.addSubview(scrollHost)
 
         terminalView.onActivity = { [weak self] in self?.noteActivity() }
         terminalView.onBell = { [weak self] in self?.noteBell() }
@@ -285,6 +289,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         showsHeader = config.showPaneHeaders
         header.showsTrafficLights = config.trafficLights
         applyFont()
+        applyTextLayout()
         updateBackground()
         layer?.backgroundColor = NSColor.clear.cgColor
         content.layer?.backgroundColor = NSColor.clear.cgColor
@@ -341,10 +346,29 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     private func updateBackground() {
         let config = ConfigStore.shared.config
         let wanted = environmentBackground.withAlphaComponent(config.resolvedOpacity(active: isActive))
+        scrollHost.backgroundColor = wanted
         guard terminalView.nativeBackgroundColor != wanted else { return }
         terminalView.nativeBackgroundColor = wanted
         thumbnailDirty = true
     }
+
+    /// Re-reads the padding and wrapping settings from this terminal's definition, so a change to
+    /// either the global setting or this terminal's override lands in one place — the same shape
+    /// `applyFont` has, and for the same reason.
+    func applyTextLayout() {
+        let config = ConfigStore.shared.config
+        let def = controller?.registry.definition(definitionID)
+        scrollHost.unwrappedColumns = config.resolvedUnwrappedColumns
+        scrollHost.padding = config.resolvedPadding(def?.padding)
+        scrollHost.wrapsLines = config.resolvedLineWrap(def?.lineWrap)
+        thumbnailDirty = true
+    }
+
+    /// The padding actually in use, whether inherited or overridden.
+    var effectivePadding: CGFloat { scrollHost.padding }
+
+    /// Whether this terminal is wrapping right now, whether inherited or overridden.
+    var wrapsLines: Bool { scrollHost.wrapsLines }
 
     private func refreshAppearance() {
         updateBackground()
@@ -449,7 +473,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         let headerH = showsHeader ? PaneHeaderView.height : 0
         header.frame = NSRect(x: 0, y: inner.height - headerH, width: inner.width, height: headerH)
         let termFrame = NSRect(x: 0, y: 0, width: inner.width, height: max(0, inner.height - headerH))
-        if terminalView.frame != termFrame { terminalView.frame = termFrame }
+        if scrollHost.frame != termFrame { scrollHost.frame = termFrame }
         if let bar = findBar {
             let w = min(FindBarView.width, max(60, termFrame.width - 16))
             bar.frame = NSRect(x: termFrame.maxX - w - 8, y: termFrame.maxY - FindBarView.height - 8,
@@ -556,12 +580,17 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     private func quantizeToCells(_ r: NSRect, zone: ChromeZone, cell: CGSize) -> NSRect {
         guard cell.width >= 1, cell.height >= 1 else { return r }
         let b = PaneChrome.border
-        let chromeW = 2 * b
-        let chromeH = b + (showsHeader ? PaneHeaderView.height + b : PaneChrome.headlessGrip)
-        let cols = max(1, ((r.width - chromeW) / cell.width).rounded())
+        let pad = effectivePadding
+        let chromeW = 2 * b + 2 * pad
+        let chromeH = b + 2 * pad + (showsHeader ? PaneHeaderView.height + b : PaneChrome.headlessGrip)
         let rows = max(1, ((r.height - chromeH) / cell.height).rounded())
         var out = r
-        out.size.width = max(PaneChrome.minSize.width, cols * cell.width + chromeW)
+        // An unwrapped terminal's column count comes from the setting, not from its width, so
+        // there is no grid boundary to snap the horizontal drag to.
+        if wrapsLines {
+            let cols = max(1, ((r.width - chromeW) / cell.width).rounded())
+            out.size.width = max(PaneChrome.minSize.width, cols * cell.width + chromeW)
+        }
         out.size.height = max(PaneChrome.minSize.height, rows * cell.height + chromeH)
         // Keep the edge the user is not dragging pinned.
         if zone.resizesLeft { out.origin.x = r.maxX - out.width }
@@ -697,7 +726,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
             let bar = FindBarView(frame: .zero)
             bar.terminalView = terminalView
             bar.onClose = { [weak self] in self?.hideFindBar() }
-            content.addSubview(bar, positioned: .above, relativeTo: terminalView)
+            content.addSubview(bar, positioned: .above, relativeTo: scrollHost)
             findBar = bar
             needsLayout = true
             layoutSubtreeIfNeeded()

@@ -17,6 +17,9 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
     private let fontPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
     private let fontSizeField = NSTextField()
     private let fontSizeStepper = NSStepper()
+    private let wrapPopUp = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let paddingField = NSTextField()
+    private let paddingStepper = NSStepper()
     private let reopenCheck = NSButton(checkboxWithTitle: "Run commands when reopening", target: nil, action: nil)
     private let historyCheck = NSButton(checkboxWithTitle: "Own command history", target: nil, action: nil)
     private let applyButton = NSButton(title: "Run Commands Now", target: nil, action: nil)
@@ -37,7 +40,7 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 466))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 520))
         let pad: CGFloat = 14
         let width = root.bounds.width - 2 * pad
         var y = root.bounds.height - pad
@@ -113,6 +116,43 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
         root.addSubview(fontSizeStepper)
         y -= 10
 
+        // Wrapping and padding share a row for the same reason the font does: an empty or
+        // "Global" control means inherit, so the two only need as much space as their values.
+        label("Line wrapping and padding")
+        y -= 24
+        wrapPopUp.frame = NSRect(x: pad, y: y, width: width - 92, height: 24)
+        wrapPopUp.target = self
+        wrapPopUp.action = #selector(wrapChanged)
+        let globalWrap = ConfigStore.shared.config.lineWrap ? "wrap" : "no wrap"
+        for (title, tag) in [("Global (\(globalWrap))", 0), ("Wrap long lines", 1), ("Do not wrap", 2)] {
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.tag = tag
+            wrapPopUp.menu?.addItem(item)
+        }
+        wrapPopUp.toolTip = "Unwrapped terminals keep a fixed, wider grid and scroll sideways."
+        root.addSubview(wrapPopUp)
+
+        paddingField.frame = NSRect(x: pad + width - 88, y: y + 1, width: 44, height: 22)
+        paddingField.alignment = .right
+        paddingField.placeholderString = String(format: "%g", ConfigStore.shared.config.terminalPadding)
+        paddingField.toolTip = "Margin between this terminal's border and its text. Empty inherits the global setting."
+        paddingField.delegate = self
+        root.addSubview(paddingField)
+        paddingStepper.frame = NSRect(x: pad + width - 40, y: y, width: 19, height: 24)
+        paddingStepper.minValue = 0
+        paddingStepper.maxValue = TermsieConfig.maxPadding
+        paddingStepper.increment = 1
+        paddingStepper.valueWraps = false
+        paddingStepper.target = self
+        paddingStepper.action = #selector(paddingStepped)
+        root.addSubview(paddingStepper)
+        let paddingUnit = NSTextField(labelWithString: "pt")
+        paddingUnit.font = UIFonts.system(size: 10)
+        paddingUnit.textColor = .tertiaryLabelColor
+        paddingUnit.frame = NSRect(x: pad + width - 16, y: y + 5, width: 16, height: 14)
+        root.addSubview(paddingUnit)
+        y -= 10
+
         label("Working folder")
         y -= 22
         cwdField.frame = NSRect(x: pad, y: y, width: width - 78, height: 22)
@@ -179,6 +219,9 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
         }
         fontSizeField.stringValue = def.fontSize.map { String(format: "%g", $0) } ?? ""
         fontSizeStepper.doubleValue = def.fontSize ?? ConfigStore.shared.config.font.size
+        wrapPopUp.selectItem(withTag: def.lineWrap.map { $0 ? 1 : 2 } ?? 0)
+        paddingField.stringValue = def.padding.map { String(format: "%g", $0) } ?? ""
+        paddingStepper.doubleValue = def.padding ?? ConfigStore.shared.config.terminalPadding
         historyCheck.state = def.isolatedHistory ? .on : .off
         applyButton.isEnabled = registry?.isOpen(definitionID) ?? false
         validateFolder()
@@ -216,6 +259,10 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
             if let size = enteredFontSize { fontSizeStepper.doubleValue = size }
             commit()
         }
+        if field === paddingField {
+            if let value = enteredPadding { paddingStepper.doubleValue = value }
+            commit()
+        }
     }
 
     func controlTextDidEndEditing(_ obj: Notification) { commit() }
@@ -239,7 +286,30 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
         return min(max(value, TermsieConfig.minFontSize), TermsieConfig.maxFontSize)
     }
 
+    /// An empty padding field means "inherit the global padding".
+    private var enteredPadding: Double? {
+        let text = paddingField.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty, let value = Double(text) else { return nil }
+        return min(max(value, 0), TermsieConfig.maxPadding)
+    }
+
+    /// `nil` when the popup is on "Global", which is what makes the terminal follow the setting.
+    private var selectedLineWrap: Bool? {
+        switch wrapPopUp.selectedItem?.tag ?? 0 {
+        case 1: return true
+        case 2: return false
+        default: return nil
+        }
+    }
+
     @objc private func fontChanged() { commit() }
+
+    @objc private func wrapChanged() { commit() }
+
+    @objc private func paddingStepped() {
+        paddingField.stringValue = String(format: "%g", paddingStepper.doubleValue)
+        commit()
+    }
 
     @objc private func fontSizeStepped() {
         fontSizeField.stringValue = String(format: "%g", fontSizeStepper.doubleValue)
@@ -284,6 +354,8 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
             def.environment = selectedEnvironment
             def.fontFamily = selectedFontFamily
             def.fontSize = enteredFontSize
+            def.padding = enteredPadding
+            def.lineWrap = selectedLineWrap
         }
     }
 

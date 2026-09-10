@@ -13,6 +13,12 @@ final class TermsieTerminalView: LocalProcessTerminalView {
     /// terminal). Returning true suppresses SwiftTerm's own handling for that event.
     var onChromeDrag: ((NSEvent) -> Bool)?
     var onInputAfterExit: (() -> Void)?
+    /// The user typed something, so an unwrapped terminal can scroll the caret back into view once
+    /// the shell has echoed it.
+    var onUserInput: (() -> Void)?
+    /// Output was applied to the buffer. Unlike `onActivity` this is not throttled, because what
+    /// listens to it debounces for itself and must not miss the last burst of a command.
+    var onOutput: (() -> Void)?
     /// Other views that should receive the same keyboard input. Returns [] when not broadcasting.
     var broadcastTargets: (() -> [TermsieTerminalView])?
     /// Whether something other than the shell owns the terminal right now. Asked of the pane,
@@ -59,6 +65,7 @@ final class TermsieTerminalView: LocalProcessTerminalView {
             if cursor < slice.endIndex { feedPreservingSelection(slice[cursor...]) }
         }
 
+        onOutput?()
         let now = CACurrentMediaTime()
         if now - lastActivityNotification > 0.3 {
             lastActivityNotification = now
@@ -171,6 +178,7 @@ final class TermsieTerminalView: LocalProcessTerminalView {
         }
         if !emulatorReplyInFlight { noteUserInput(data) }
         super.send(source: source, data: data)
+        if !emulatorReplyInFlight { onUserInput?() }
         guard !emulatorReplyInFlight, let targets = broadcastTargets?(), !targets.isEmpty else { return }
         for target in targets where target !== self && !target.hasExited {
             target.process?.send(data: data)
