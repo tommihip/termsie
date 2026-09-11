@@ -6,6 +6,14 @@
 #   ./scripts/release.sh --publish       # ... and cut the GitHub release + update the Homebrew tap
 #   ./scripts/release.sh --skip-notarize # local dry run of the whole pipeline, ad-hoc signed
 #
+#   ./scripts/release.sh --version 0.7.0 --publish
+#       set the version in Info.plist and AppInfo.version first; with --publish the
+#       bump is committed as "chore: release 0.7.0" so the tag points at it
+#
+# --publish refuses to run when the version's tag or GitHub release already exists,
+# because it would move the tag, replace the dmg and rewrite the cask under the same
+# version. Add --force to overwrite that release on purpose.
+#
 # Requires, for a real (notarised) release:
 #   * a "Developer ID Application" certificate in the login keychain
 #     (Xcode ▸ Settings ▸ Accounts ▸ your team ▸ Manage Certificates ▸ + )
@@ -26,19 +34,41 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="$ROOT/dist"
 APP="$DIST/$APP_NAME.app"
 
+PLIST="$ROOT/Resources/Info.plist"
+APPINFO="$ROOT/Sources/Termsie/Terminal/TerminalPane.swift"
+
 PUBLISH=0
 SKIP_NOTARIZE=0
-for arg in "$@"; do
-  case "$arg" in
+FORCE=0
+NEW_VERSION=""
+while [ $# -gt 0 ]; do
+  case "$1" in
     --publish) PUBLISH=1 ;;
     --skip-notarize) SKIP_NOTARIZE=1 ;;
-    *) echo "unknown flag: $arg" >&2; exit 2 ;;
+    --force) FORCE=1 ;;
+    --version)
+      [ $# -ge 2 ] || { echo "--version needs a value, e.g. --version 0.7.0" >&2; exit 2; }
+      NEW_VERSION="$2"
+      shift
+      ;;
+    --version=*) NEW_VERSION="${1#--version=}" ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
   esac
+  shift
 done
+
+if [ -n "$NEW_VERSION" ] && ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "--version must look like 1.2.3, got: $NEW_VERSION" >&2
+  exit 2
+fi
+if [ "$FORCE" = 1 ] && [ "$PUBLISH" = 0 ]; then
+  echo "--force only applies together with --publish" >&2
+  exit 2
+fi
 
 say() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
 
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT/Resources/Info.plist")"
+VERSION="${NEW_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")}"
 TAG="v$VERSION"
 DMG="$DIST/$APP_NAME-$VERSION.dmg"
 
@@ -64,6 +94,64 @@ MSG
     exit 1
   fi
   say "Signing as: $IDENTITY"
+fi
+
+# ---------------------------------------------------------------- existing release guard
+# Checked before the version bump and the build, so a refusal leaves the tree
+# untouched and costs seconds rather than a notarisation round trip. Lookups that
+# fail for any reason other than "not there" abort instead of counting as absent.
+if [ "$PUBLISH" = 1 ]; then
+  EXISTING=""
+  if git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+    EXISTING="local tag"
+  fi
+  REMOTE_TAG="$(git -C "$ROOT" ls-remote --tags origin "refs/tags/$TAG")"
+  if [ -n "$REMOTE_TAG" ]; then
+    EXISTING="${EXISTING:+$EXISTING, }tag on origin"
+  fi
+  if GH_ERR="$(gh release view "$TAG" --repo "$REPO" 2>&1 >/dev/null)"; then
+    EXISTING="${EXISTING:+$EXISTING, }GitHub release"
+  elif [[ "$GH_ERR" != *"release not found"* ]]; then
+    echo "Could not check whether $TAG is already released on $REPO:" >&2
+    echo "  $GH_ERR" >&2
+    exit 1
+  fi
+
+  if [ -n "$EXISTING" ]; then
+    if [ "$FORCE" = 0 ]; then
+      cat >&2 <<MSG
+$TAG already exists ($EXISTING).
+
+Publishing again would move the tag to HEAD, replace the dmg and rewrite the
+Homebrew cask, all under the same version number.
+
+Cut a new release instead:
+  ./scripts/release.sh --version <next version> --publish
+Overwrite $TAG on purpose:
+  ./scripts/release.sh ${NEW_VERSION:+--version $NEW_VERSION }--publish --force
+MSG
+      exit 1
+    fi
+    say "$TAG already exists ($EXISTING); --force given, it will be overwritten"
+  fi
+fi
+
+# ---------------------------------------------------------------- version bump
+if [ -n "$NEW_VERSION" ]; then
+  say "Setting version to $VERSION"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
+  sed -i '' -E "s/(static let version = \")[^\"]*(\")/\\1$VERSION\\2/" "$APPINFO"
+  if ! grep -qF "static let version = \"$VERSION\"" "$APPINFO"; then
+    echo "Could not set AppInfo.version in $APPINFO" >&2
+    exit 1
+  fi
+
+  # The tag is placed on HEAD, so the bump has to be in a commit for the tag to
+  # match what was built. Only the two version files go in; nothing else staged.
+  if [ "$PUBLISH" = 1 ] && ! git -C "$ROOT" diff --quiet HEAD -- "$PLIST" "$APPINFO"; then
+    git -C "$ROOT" commit -q -m "chore: release $VERSION" -- "$PLIST" "$APPINFO"
+    echo "  committed \"chore: release $VERSION\" ($(git -C "$ROOT" rev-parse --short HEAD))"
+  fi
 fi
 
 # ---------------------------------------------------------------- build (universal)
@@ -151,8 +239,13 @@ echo "sha256: $SHA"
 # ---------------------------------------------------------------- publish
 if [ "$PUBLISH" = 1 ]; then
   say "Publishing $TAG to $REPO"
-  git -C "$ROOT" tag -f "$TAG"
-  git -C "$ROOT" push -f origin "$TAG"
+  if [ "$FORCE" = 1 ]; then
+    git -C "$ROOT" tag -f "$TAG"
+    git -C "$ROOT" push -f origin "$TAG"
+  else
+    git -C "$ROOT" tag "$TAG"
+    git -C "$ROOT" push origin "$TAG"
+  fi
   NOTES="$ROOT/docs/release-notes.md"
   if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
     gh release upload "$TAG" "$DMG" --repo "$REPO" --clobber
