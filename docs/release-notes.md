@@ -1,4 +1,4 @@
-The first prebuilt release of Termsie — universal, signed with a Developer ID and
+The second prebuilt release of Termsie — universal, signed with a Developer ID and
 notarised by Apple, so it opens with an ordinary double click.
 
 **Install:** download the `.dmg` below and drag Termsie to your Applications folder, or
