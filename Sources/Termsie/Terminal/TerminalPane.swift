@@ -78,7 +78,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
 
     // MARK: Init
 
-    init(config: TermsieConfig, definition: TerminalDefinition, isReopen: Bool) {
+    init(config: TermsieConfig, definition: TerminalDefinition, isReopen: Bool, runCommands: Bool = true) {
         definitionID = definition.id
         let options = TerminalOptions(cursorStyle: config.terminalCursorStyle, scrollback: config.scrollback)
         terminalView = TermsieTerminalView(
@@ -88,7 +88,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         scrollHost = TerminalScrollHost(terminalView: terminalView)
         super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         initialDirectory = definition.cwd
-        startupCommands = definition.commands(isReopen: isReopen)
+        startupCommands = runCommands ? definition.commands(isReopen: isReopen) : []
         customTitle = definition.name
         shellName = (config.resolvedShell as NSString).lastPathComponent
 

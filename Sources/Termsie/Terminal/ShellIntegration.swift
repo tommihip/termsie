@@ -194,8 +194,10 @@ enum ShellIntegration {
         if wantsCommands {
             // Inline, never an exported function: exported bash functions are the Shellshock
             // mechanism and behave differently across versions.
+            let record = config.startupCommands.recordInHistory
             let encoded = commands.map { $0.replacingOccurrences(of: "'", with: "'\\''") }
-                .map { "eval '\($0)'" }.joined(separator: "; ")
+                .map { record ? "history -s '\($0)'; eval '\($0)'" : "eval '\($0)'" }
+                .joined(separator: "; ")
             hooks.append("if [ -z \"$__TERMSIE_RAN\" ]; then __TERMSIE_RAN=1; \(encoded); fi")
             plan.runsStartupCommands = true
         }

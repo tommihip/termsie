@@ -96,5 +96,41 @@ if [[ -f $FIX/hA ]] && grep -q AAAMARKER $FIX/hA; then print "  ok   A's command
 if [[ -f $FIX/hB ]] && ! grep -q AAAMARKER $FIX/hB; then print "  ok   A's command absent from B's history"; else print "  FAIL A leaked into B"; fail=1; fi
 if [[ -f $FIX/hB ]] && grep -q BBBMARKER $FIX/hB; then print "  ok   B's command in B's history"; else print "  FAIL B's history missing"; fail=1; fi
 
+print "\n== interrupting a startup command (real pty via expect)"
+# Ctrl-C used to abort the startup hook before it cleared its queue, so the next Enter — whatever
+# had been typed — ran the startup commands all over again.
+cat > $FIX/int.exp <<'EXP'
+set timeout 10
+set fix [lindex $argv 0]
+spawn env -i HOME=$fix TERM=xterm PATH=/usr/bin:/bin ZDOTDIR=$fix/shim TERMSIE_HISTFILE=$fix/hI TERMSIE_PANE_ID=i \
+  TERMSIE_STARTUP_COUNT=2 {TERMSIE_STARTUP_1=sleep 30} {TERMSIE_STARTUP_2=echo SECONDCMD} /bin/zsh -li
+expect "> sleep 30"
+sleep 0.5
+send "\003"
+expect {
+  "SECONDCMD" { puts "\nRAN_SECOND"; exit 2 }
+  -re {[%$#>] } {}
+}
+send "echo TYPED\r"
+expect "\nTYPED"
+expect {
+  "> sleep 30" { puts "\nRERAN"; exit 3 }
+  timeout { puts "\nNOPROMPT"; exit 4 }
+  -re {[%$#>] } {}
+}
+send "exit\r"
+expect eof
+exit 0
+EXP
+/usr/bin/expect -f $FIX/int.exp $FIX >/dev/null 2>&1
+case $? in
+  0) print "  ok   Ctrl-C stops the startup commands for good" ;;
+  2) print "  FAIL commands after the interrupted one still ran"; fail=1 ;;
+  3) print "  FAIL the startup command ran again at the next prompt"; fail=1 ;;
+  *) print "  FAIL interrupt case did not complete"; fail=1 ;;
+esac
+if [[ -f $FIX/hI ]] && grep -q 'sleep 30' $FIX/hI; then print "  ok   startup command is in history"; else print "  FAIL startup command missing from history"; fail=1; fi
+if [[ -f $FIX/hI ]] && grep -q 'echo TYPED' $FIX/hI; then print "  ok   typed command is in history"; else print "  FAIL typed command missing from history"; fail=1; fi
+
 print ""
 if (( fail )); then print "SHIM TESTS FAILED"; exit 1; else print "all shim tests passed"; fi

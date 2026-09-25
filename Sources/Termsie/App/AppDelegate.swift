@@ -58,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startCursorTracking()
         pruneStaleTerminalState()
         DebugDriver.startIfRequested()
+        Updater.shared.startAutomaticChecks()
     }
 
     /// One monitor for the whole app, rather than a tracking area per window.
@@ -131,6 +132,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        Updater.shared.installPendingUpdate()
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -142,10 +147,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func makeWindowController(layout: TabLayout?, frame: NSRect?,
                               sidebarVisible: Bool? = nil, sidebarWidth: Double? = nil,
-                              workspaceName: String? = nil) -> TerminalWindowController {
+                              workspaceName: String? = nil,
+                              runStartupCommands: Bool = true) -> TerminalWindowController {
         let controller = TerminalWindowController(layout: layout, frame: frame,
                                                   sidebarVisible: sidebarVisible, sidebarWidth: sidebarWidth,
-                                                  workspaceName: workspaceName)
+                                                  workspaceName: workspaceName,
+                                                  runStartupCommands: runStartupCommands)
         controller.onClose = { [weak self] c in
             self?.controllers.removeAll { $0 === c }
             self?.scheduleSessionSave()
@@ -156,8 +163,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @discardableResult
-    func newWindow(cwd: String?, layout: TabLayout? = nil) -> TerminalWindowController {
-        let controller = makeWindowController(layout: layout ?? TabLayout.single(cwd: cwd), frame: nil)
+    func newWindow(cwd: String?, layout: TabLayout? = nil, runStartupCommands: Bool = true) -> TerminalWindowController {
+        let controller = makeWindowController(layout: layout ?? TabLayout.single(cwd: cwd), frame: nil,
+                                              runStartupCommands: runStartupCommands)
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         return controller
@@ -172,11 +180,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // terminals write into one history file.
         var layout = workspace.layout.regeneratingIDs()
         layout.workspaceName = workspace.name
+        let run = confirmStartupCommands(in: [layout], opening: "“\(workspace.name)”")
         if inNewTab, let key = keyController {
-            _ = key.addTab(layout: layout)
+            _ = key.addTab(layout: layout, runStartupCommands: run)
         } else {
-            newWindow(cwd: nil, layout: layout)
+            newWindow(cwd: nil, layout: layout, runStartupCommands: run)
         }
+    }
+
+    /// Asks whether to run the startup commands of the terminals about to open. True when there
+    /// is nothing to ask about, or asking is turned off.
+    ///
+    /// Reopening a workspace is often just to look at it, and its commands may start servers or
+    /// deploys — so running them is offered rather than assumed.
+    private func confirmStartupCommands(in layouts: [TabLayout], opening what: String) -> Bool {
+        guard ConfigStore.shared.config.startupCommands.askBeforeRunning, !DebugDriver.isActive else { return true }
+        let lines = layouts.flatMap(\.terminals).filter(\.openOnRestore).flatMap { def in
+            def.commands(isReopen: false).map { "\(def.displayName): \($0)" }
+        }
+        guard !lines.isEmpty else { return true }
+
+        let shown = 10
+        var list = lines.prefix(shown).joined(separator: "\n")
+        if lines.count > shown { list += "\n… and \(lines.count - shown) more" }
+        let alert = NSAlert()
+        alert.messageText = "Run the startup commands for \(what)?"
+        alert.informativeText = list + "\n\nSkipping opens the terminals without running anything. "
+            + "Each terminal can still run its commands later from its settings."
+        alert.addButton(withTitle: "Run Commands")
+        alert.addButton(withTitle: "Skip").keyEquivalent = "\u{1b}"
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     func openWorkspace(named name: String, inNewTab: Bool) {
@@ -206,8 +240,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             seen.insert(groupKey)
             let tabControllers = tabbed.compactMap { $0.windowController as? TerminalWindowController }
             guard !tabControllers.isEmpty else { continue }
-            // Startup commands persist and do run on restore — activating a venv is exactly the
-            // point. Only the inferred running command is left out.
+            // Startup commands persist and are offered on restore — activating a venv is exactly
+            // the point. Only the inferred running command is left out.
             let layouts = tabControllers.map { $0.snapshot() }
             let selected = window.tabGroup?.selectedWindow.flatMap { tabbed.firstIndex(of: $0) } ?? 0
             let f = window.frame
@@ -226,6 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func restore(_ session: SessionSnapshot) {
+        let run = confirmStartupCommands(in: session.windows.flatMap(\.tabs), opening: "the last session")
         for w in session.windows {
             guard let first = w.tabs.first else { continue }
             var frame: NSRect? = nil
@@ -234,11 +269,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             let controller = makeWindowController(layout: first, frame: frame,
                                                   sidebarVisible: w.sidebarVisible,
-                                                  sidebarWidth: w.sidebarWidth)
+                                                  sidebarWidth: w.sidebarWidth,
+                                                  runStartupCommands: run)
             controller.showWindow(nil)
             controller.window?.makeKeyAndOrderFront(nil)
             var tabs = [controller]
-            for layout in w.tabs.dropFirst() { tabs.append(controller.addTab(layout: layout)) }
+            for layout in w.tabs.dropFirst() { tabs.append(controller.addTab(layout: layout, runStartupCommands: run)) }
             if w.selectedTab < tabs.count, let win = tabs[w.selectedTab].window {
                 win.makeKeyAndOrderFront(nil)
             }
@@ -249,6 +285,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func newWindow(_ sender: Any?) {
         newWindow(cwd: keyController?.activePane?.currentDirectory)
+    }
+
+    @MainActor @objc func checkForUpdates(_ sender: Any?) {
+        Updater.shared.checkNow()
     }
 
     @objc func openSettings(_ sender: Any?) {

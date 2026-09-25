@@ -20,6 +20,7 @@ enum MainMenu {
         // Application
         let appMenu = NSMenu(title: AppInfo.name)
         appMenu.addItem(item("About \(AppInfo.name)", #selector(NSApplication.orderFrontStandardAboutPanel(_:))))
+        appMenu.addItem(item("Check for Updates…", #selector(AppDelegate.checkForUpdates(_:))))
         appMenu.addItem(.separator())
         appMenu.addItem(item("Settings…", #selector(AppDelegate.openSettings(_:)), ","))
         appMenu.addItem(item("Manage Environments…", #selector(AppDelegate.openEnvironmentSettings(_:))))

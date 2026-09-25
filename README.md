@@ -66,6 +66,17 @@ brew install --cask tommihip/tap/termsie
 Both give you a universal build that runs on Apple silicon and Intel, and open
 with an ordinary double click.
 
+### Updates
+
+Termsie looks for a new release once a day and asks before installing it; **Termsie ▸ Check for
+Updates…** looks right away. Installing downloads the release's disk image from GitHub, refuses it
+unless the app inside is signed with Termsie's Developer ID, then quits, swaps the app in place and
+reopens. Turn the daily check off in Settings ▸ General or with `updates.checkAutomatically`.
+
+A copy Termsie cannot write to (an Applications folder that needs an administrator, or an app
+still running from the disk image) is pointed at the release page instead. Homebrew installs
+update the same way; the cask is marked `auto_updates`, so `brew upgrade` leaves them alone.
+
 ### From source
 
 Takes about a minute.
@@ -216,14 +227,15 @@ Every key is optional.
     "respectShareHistory": true,
     "retentionDays": 30
   },
-  "startupCommands": { "mode": "shim", "echo": true, "recordInHistory": false },
+  "startupCommands": { "mode": "shim", "echo": true, "recordInHistory": true, "askBeforeRunning": true },
   "copy": {
     "autoCopyOnSelect": false,
     "showTools": true,
     "commandMarks": true,
     "trimCopiedText": true
   },
-  "sidebar": { "visible": true, "width": 264, "rowHeight": 84, "thumbnailRefreshMs": 500 }
+  "sidebar": { "visible": true, "width": 264, "rowHeight": 84, "thumbnailRefreshMs": 500 },
+  "updates": { "checkAutomatically": true }
 }
 ```
 
@@ -262,6 +274,8 @@ Every key is optional.
   [Copying a command, not a rectangle](#copying-a-command-not-a-rectangle).
 - `copy.trimCopiedText`: drop the right-hand padding a terminal grid puts on every row, and the
   blank screen below the last line.
+- `updates.checkAutomatically` (also in Settings ▸ General): look for a new release once a day and
+  offer to install it. See [Updates](#updates).
 
 Colors live under `colors`, including `sidebarBackground`, `sidebarSelection`, and the 16-entry
 `ansi` palette.
@@ -334,7 +348,10 @@ back silently strips whatever that file sets up, commonly half your `PATH`. `scr
 exists to prove that never happens.
 
 Startup commands run from that same shim, once, just before the first prompt. They are echoed dim
-so their output is never unattributed, and kept out of your history. They are not typed into the
+so their output is never unattributed, and added to that terminal's history so the up arrow brings
+them back (`recordInHistory: false` keeps them out). Interrupting one with Ctrl-C skips the rest and
+leaves a normal prompt. When a workspace or the last session opens, Termsie asks whether to run them
+or open the terminals without them (`askBeforeRunning: false` always runs). They are not typed into the
 terminal, which matters: typing several commands at once feeds later lines into the standard input
 of whatever the earlier one started.
 
@@ -410,7 +427,8 @@ been observed returning nil — which then detonates deep inside CoreText, far f
 
 ```
 Sources/Termsie/
-  App/        AppDelegate, MainMenu, Config (JSON + file watcher), DebugDriver, WindowCapture, UIFonts
+  App/        AppDelegate, MainMenu, Config (JSON + file watcher), DebugDriver, WindowCapture, UIFonts,
+              Updater (GitHub release check, signature-verified self-update)
   Model/      TerminalDefinition (the saved terminal), TerminalRegistry (definitions ↔ live panes)
   Window/     TerminalWindowController — lifecycle, focus, menus, workspace and session plumbing
   Layout/     PaneCanvasView (floating terminals), PaneChrome (hit zones), Arrange (tile/cascade),

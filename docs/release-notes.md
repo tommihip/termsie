@@ -1,5 +1,18 @@
-The second prebuilt release of Termsie — universal, signed with a Developer ID and
-notarised by Apple, so it opens with an ordinary double click.
+Termsie 0.7.0 — universal, signed with a Developer ID and notarised by Apple.
+
+## What's new
+
+- **Auto-update.** Termsie now checks GitHub for new releases and can download,
+  verify and install them from inside the app.
+- **Close-workspace warning when creating a new one.** Creating a new workspace now
+  asks before closing the one that is currently open.
+- **Running-command warning on workspace close.** Closing a workspace warns you if
+  any of its terminals still has a command running.
+
+## Fixes
+
+- A terminal with a startup command that was interrupted with a break (Ctrl-C)
+  would not always run its startup command again. It now does reliably.
 
 **Install:** download the `.dmg` below and drag Termsie to your Applications folder, or
 

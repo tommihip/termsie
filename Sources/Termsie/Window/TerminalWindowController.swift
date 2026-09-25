@@ -32,7 +32,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     // MARK: Init
 
     init(layout: TabLayout?, frame: NSRect?, sidebarVisible: Bool? = nil, sidebarWidth: Double? = nil,
-         workspaceName: String? = nil) {
+         workspaceName: String? = nil, runStartupCommands: Bool = true) {
         let config = ConfigStore.shared.config
         headersVisible = config.showPaneHeaders
 
@@ -75,7 +75,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         let initial = layout ?? TabLayout.single()
         self.workspaceName = workspaceName ?? initial.workspaceName
         registry.load(initial)
-        build(initial)
+        build(initial, runCommands: runStartupCommands)
         markSaved()
 
         configObserver = NotificationCenter.default.addObserver(forName: .termsieConfigChanged,
@@ -92,10 +92,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     // MARK: Building
 
-    private func build(_ layout: TabLayout) {
+    /// `runCommands` false opens every terminal without its startup commands, leaving the saved
+    /// commands themselves untouched.
+    private func build(_ layout: TabLayout, runCommands: Bool) {
         container.layoutSubtreeIfNeeded()
         for def in layout.terminals where def.openOnRestore {
-            openTerminal(def.id, isReopen: false, focus: false)
+            openTerminal(def.id, isReopen: false, focus: false, runCommands: runCommands)
         }
         renumber()
         updateEmptyState()
@@ -115,8 +117,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         }
     }
 
-    private func makePane(_ def: TerminalDefinition, isReopen: Bool) -> TerminalPane {
-        let pane = TerminalPane(config: ConfigStore.shared.config, definition: def, isReopen: isReopen)
+    private func makePane(_ def: TerminalDefinition, isReopen: Bool, runCommands: Bool) -> TerminalPane {
+        let pane = TerminalPane(config: ConfigStore.shared.config, definition: def, isReopen: isReopen,
+                                runCommands: runCommands)
         pane.controller = self
         pane.showsHeader = headersVisible
         pane.isBroadcasting = broadcastEnabled
@@ -126,9 +129,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     // MARK: Terminal lifecycle
 
     @discardableResult
-    func openTerminal(_ id: String, isReopen: Bool, focus: Bool = true) -> TerminalPane? {
+    func openTerminal(_ id: String, isReopen: Bool, focus: Bool = true, runCommands: Bool = true) -> TerminalPane? {
         guard let def = registry.definition(id), !registry.isOpen(id) else { return registry.pane(for: id) }
-        let pane = makePane(def, isReopen: isReopen)
+        let pane = makePane(def, isReopen: isReopen, runCommands: runCommands)
         let fraction = def.fractionalFrame ?? canvas.fraction(for: Arrange.nextSlot(in: canvas.bounds,
                                                                                     existing: canvas.occupiedFrames))
         canvas.add(pane, fraction: fraction)
@@ -618,9 +621,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     // MARK: Tabs
 
-    func addTab(layout: TabLayout) -> TerminalWindowController {
+    func addTab(layout: TabLayout, runStartupCommands: Bool = true) -> TerminalWindowController {
         let controller = AppDelegate.shared.makeWindowController(layout: layout, frame: nil,
-                                                                 workspaceName: layout.workspaceName)
+                                                                 workspaceName: layout.workspaceName,
+                                                                 runStartupCommands: runStartupCommands)
         if let mine = window, let theirs = controller.window {
             mine.addTabbedWindow(theirs, ordered: .above)
             theirs.makeKeyAndOrderFront(nil)
@@ -769,7 +773,29 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     /// Clears this tab back to a single empty terminal, offering to save first.
     @objc func newWorkspace(_ sender: Any?) {
-        confirmDiscardingChanges { [weak self] in self?.resetToEmptyWorkspace() }
+        confirmTerminatingRunningJobs(closing: "workspace") { [weak self] in
+            self?.confirmDiscardingChanges { [weak self] in self?.resetToEmptyWorkspace() }
+        }
+    }
+
+    /// Runs `proceed` once the user agrees to terminate this tab's running processes. Runs it
+    /// straight away when nothing is running or asking is turned off; Cancel drops it.
+    private func confirmTerminatingRunningJobs(closing what: String, _ proceed: @escaping () -> Void) {
+        let running = registry.livePanes.filter(\.hasRunningJob)
+        guard ConfigStore.shared.config.confirmClosingRunningProcess, !running.isEmpty, let window else {
+            proceed()
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = running.count == 1
+            ? "Close \(what) running “\(running[0].foregroundJob ?? "process")”?"
+            : "Close \(what) with \(running.count) running processes?"
+        alert.informativeText = "Running processes will be terminated."
+        alert.addButton(withTitle: "Close")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { response in
+            if response == .alertFirstButtonReturn { proceed() }
+        }
     }
 
     /// Runs `proceed` once the user has dealt with any unsaved changes.
@@ -958,20 +984,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     // MARK: NSWindowDelegate
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        let running = registry.livePanes.filter(\.hasRunningJob)
-        guard ConfigStore.shared.config.confirmClosingRunningProcess, !running.isEmpty else { return true }
-        let alert = NSAlert()
-        alert.messageText = running.count == 1
-            ? "Close window running “\(running[0].foregroundJob ?? "process")”?"
-            : "Close window with \(running.count) running processes?"
-        alert.informativeText = "Running processes will be terminated."
-        alert.addButton(withTitle: "Close")
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: sender) { response in
-            if response == .alertFirstButtonReturn {
-                self.isClosing = true
-                sender.close()
-            }
+        guard ConfigStore.shared.config.confirmClosingRunningProcess,
+              registry.livePanes.contains(where: \.hasRunningJob) else { return true }
+        confirmTerminatingRunningJobs(closing: "window") {
+            self.isClosing = true
+            sender.close()
         }
         return false
     }

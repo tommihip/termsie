@@ -10,7 +10,7 @@ import Foundation
 enum ShimScripts {
     /// Bump when any script below changes; generated directories carry this and regenerate on
     /// mismatch after an app upgrade.
-    static let version = "2"
+    static let version = "3"
 
     private static let header = """
     # Termsie shell integration — generated, do not edit. Regenerated when Termsie updates.
@@ -134,6 +134,13 @@ enum ShimScripts {
     unset TERMSIE_STARTUP_COUNT
 
     __termsie_precmd() {
+        # Unhook and take the queue before running anything. Ctrl-C during a startup command
+        # aborts the rest of this function, so any cleanup left for afterwards never happens —
+        # and the next prompt, whatever the user typed, would find the queue intact and run it
+        # all over again.
+        precmd_functions=( "${(@)precmd_functions:#__termsie_precmd}" )
+        local -a cmds=( "${__termsie_startup[@]}" )
+        __termsie_startup=()
         if (( ! ${TERMSIE_DID_HIST_CHECK:-0} )); then
             typeset -g TERMSIE_DID_HIST_CHECK=1
             # Anything registered after us may have moved HISTFILE. History is already loaded by
@@ -148,19 +155,17 @@ enum ShimScripts {
         # everything after the first waiting for input that never comes.
         #
         # The loop is still strictly sequential: each eval returns before the next begins, so a
-        # command never receives the input intended for the one after it.
-        if (( ${#__termsie_startup} )); then
-            local cmd
-            for cmd in "${__termsie_startup[@]}"; do
-                (( ${TERMSIE_STARTUP_ECHO:-1} )) && print -Pr -- "%F{8}> ${cmd//\\%/%%}%f"
-                (( ${TERMSIE_STARTUP_RECORD:-0} )) && print -s -- $cmd
-                # eval at precmd time, not inside .zshrc: the shell is in its normal interactive
-                # loop, so job control is settled and Ctrl-C kills the command, not the shell.
-                eval $cmd
-            done
-            __termsie_startup=()
-        fi
-        precmd_functions=( "${(@)precmd_functions:#__termsie_precmd}" )
+        # command never receives the input intended for the one after it. Interrupting one
+        # command skips the rest, which is what breaking out of a startup sequence should mean.
+        local cmd
+        for cmd in "${cmds[@]}"; do
+            (( ${TERMSIE_STARTUP_ECHO:-1} )) && print -Pr -- "%F{8}> ${cmd//\\%/%%}%f"
+            # Recorded before it runs, so it is there to recall even after being interrupted.
+            (( ${TERMSIE_STARTUP_RECORD:-1} )) && print -s -- $cmd
+            # eval at precmd time, not inside .zshrc: the shell is in its normal interactive
+            # loop, so job control is settled and Ctrl-C kills the command, not the shell.
+            eval $cmd
+        done
         unset -f __termsie_precmd 2>/dev/null
         return 0
     }

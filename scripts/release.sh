@@ -271,6 +271,8 @@ cask "termsie" do
   homepage "https://termsie.com"
 
   depends_on macos: ">= :sonoma"
+  # Termsie replaces itself from inside the app; brew should not fight it over the version.
+  auto_updates true
 
   app "Termsie.app"
 

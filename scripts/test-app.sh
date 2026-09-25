@@ -74,7 +74,7 @@ check "names carried over"            "$(print -r -- "$out" | grep '"name":"api"
 check "left pane keeps its 60% width" "$(print -r -- "$out" | grep '"frame":\[0,0,0.6,1\]')"
 check "web occupies the top right"    "$(print -r -- "$out" | grep '"frame":\[0.6,0,0.4,0.5\]')"
 
-print "\n== workspace startup commands run in order, without polluting history"
+print "\n== workspace startup commands run in order, and are recorded in history"
 fix=$ROOT/ws; mkdir -p $fix/termsie/workspaces
 cat > $fix/termsie/workspaces/dev.json <<JSON
 {"version":2,"name":"dev","layout":{"version":2,"terminals":[
@@ -89,7 +89,7 @@ second" ]]; then ok "commands ran in order"; else bad "commands did not run in o
 hist=$(find $fix/termsie/panes -name '.zsh_history' 2>/dev/null | head -1)
 if [[ -n "$hist" ]]; then
   if grep -q 'typed-by-user' $hist; then ok "the user's own command is in history"; else bad "user command missing from history"; fi
-  if grep -q 'echo first' $hist; then bad "startup command leaked into history"; else ok "startup commands stay out of history"; fi
+  if grep -q 'echo first' $hist; then ok "startup commands are in history"; else bad "startup command missing from history"; fi
 else bad "no per-terminal history file was created"; fi
 
 print "\n== dragging: free movement, and snapping to a neighbour"

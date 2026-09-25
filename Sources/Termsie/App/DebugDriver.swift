@@ -11,6 +11,12 @@ import AppKit
 /// action sequence can be assembled into a video or GIF. Both go through
 /// ScreenCaptureKit and so need Screen Recording permission.
 enum DebugDriver {
+    /// True for a scripted run, which has nobody to answer a dialog.
+    static var isActive: Bool {
+        let args = CommandLine.arguments
+        return args.contains("--snapshot") || args.contains("--record")
+    }
+
     static func startIfRequested() {
         let args = CommandLine.arguments
         let snapshotPath = value(of: "--snapshot", in: args)

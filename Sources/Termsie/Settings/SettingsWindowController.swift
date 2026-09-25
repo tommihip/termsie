@@ -144,6 +144,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
 
         generalForm.section("Starting up")
         generalForm.checkbox("Reopen terminals from the last session", \.restoreSession)
+        generalForm.checkbox("Ask before running startup commands", \.startupCommands.askBeforeRunning,
+                             hint: "When a workspace or the last session opens, offer to run its terminals' startup commands or skip them.")
+        generalForm.checkbox("Add startup commands to the terminal's history", \.startupCommands.recordInHistory,
+                             hint: "So the up arrow brings them back. Takes effect in terminals opened afterwards.")
+
+        generalForm.checkbox("Check for updates automatically", \.updates.checkAutomatically,
+                             hint: "Looks for a new release once a day and asks before installing it. Termsie ▸ Check for Updates… looks right away.")
 
         generalForm.section("Terminals")
         generalForm.checkbox("Show terminal headers", \.showPaneHeaders)

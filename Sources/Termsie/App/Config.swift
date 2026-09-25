@@ -97,7 +97,9 @@ struct TermsieConfig: Codable, Equatable {
         /// "shim" runs them from the shell before the first prompt; "typed" sends keystrokes.
         var mode = "shim"
         var echo = true
-        var recordInHistory = false
+        var recordInHistory = true
+        /// Ask before running them when a workspace or the last session is opened.
+        var askBeforeRunning = true
 
         init() {}
         init(from decoder: Decoder) throws {
@@ -105,6 +107,7 @@ struct TermsieConfig: Codable, Equatable {
             mode = try c.decodeIfPresent(String.self, forKey: .mode) ?? mode
             echo = try c.decodeIfPresent(Bool.self, forKey: .echo) ?? echo
             recordInHistory = try c.decodeIfPresent(Bool.self, forKey: .recordInHistory) ?? recordInHistory
+            askBeforeRunning = try c.decodeIfPresent(Bool.self, forKey: .askBeforeRunning) ?? askBeforeRunning
         }
     }
 
@@ -127,6 +130,17 @@ struct TermsieConfig: Codable, Equatable {
             showTools = try c.decodeIfPresent(Bool.self, forKey: .showTools) ?? showTools
             commandMarks = try c.decodeIfPresent(Bool.self, forKey: .commandMarks) ?? commandMarks
             trimCopiedText = try c.decodeIfPresent(Bool.self, forKey: .trimCopiedText) ?? trimCopiedText
+        }
+    }
+
+    struct Updates: Codable, Equatable {
+        /// Look for a new release once a day, and offer to install it.
+        var checkAutomatically = true
+
+        init() {}
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            checkAutomatically = try c.decodeIfPresent(Bool.self, forKey: .checkAutomatically) ?? checkAutomatically
         }
     }
 
@@ -224,6 +238,7 @@ struct TermsieConfig: Codable, Equatable {
     var startupCommands = StartupCommands()
     var copy = Copy()
     var sidebar = Sidebar()
+    var updates = Updates()
     /// When the window is resized, scale the terminals with it. Off means they keep their size
     /// and position and only stay reachable inside the smaller window.
     var resizeTerminalsWithWindow = true
@@ -265,6 +280,7 @@ struct TermsieConfig: Codable, Equatable {
         startupCommands = try c.decodeIfPresent(StartupCommands.self, forKey: .startupCommands) ?? startupCommands
         copy = try c.decodeIfPresent(Copy.self, forKey: .copy) ?? copy
         sidebar = try c.decodeIfPresent(Sidebar.self, forKey: .sidebar) ?? sidebar
+        updates = try c.decodeIfPresent(Updates.self, forKey: .updates) ?? updates
         resizeTerminalsWithWindow = try c.decodeIfPresent(Bool.self, forKey: .resizeTerminalsWithWindow) ?? resizeTerminalsWithWindow
         snapToCells = try c.decodeIfPresent(Bool.self, forKey: .snapToCells) ?? snapToCells
         colors = try c.decodeIfPresent(Colors.self, forKey: .colors) ?? colors
