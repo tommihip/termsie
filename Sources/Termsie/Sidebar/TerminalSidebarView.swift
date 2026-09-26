@@ -9,6 +9,8 @@ protocol TerminalSidebarDelegate: AnyObject {
     func sidebarDidRequestDuplicate(_ id: String)
     func sidebarDidReorder()
     func sidebarDidRequestNew()
+    func sidebarDidRequestRunCommands(_ id: String)
+    func sidebarDidRequestRunAllCommands()
     func sidebarDidSetEnvironment(_ environment: String?, for id: String)
     func sidebarDidRequestCopy(_ target: TerminalPane.CopyTarget)
     func sidebarDidToggleAutoCopy()
@@ -28,6 +30,11 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
     private var sources: [String: ThumbnailSource] = [:]
     private var refreshTimer: Timer?
     private var quietTicks = 0
+    /// How rows lay out at the current width. Recomputed as the sidebar is dragged.
+    private(set) var rowMetrics = TerminalRowView.Metrics.forWidth(
+        TerminalRowView.Metrics.fullWidth, fullRowHeight: CGFloat(ConfigStore.shared.config.sidebar.rowHeight))
+    private var hoverTracking: NSTrackingArea?
+    private weak var hoveredRow: TerminalRowView?
 
     init(registry: TerminalRegistry) {
         self.registry = registry
@@ -40,7 +47,7 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
         tableView.gridStyleMask = []
         tableView.backgroundColor = .clear
         tableView.usesAutomaticRowHeights = false
-        tableView.rowHeight = CGFloat(ConfigStore.shared.config.sidebar.rowHeight)
+        tableView.rowHeight = rowMetrics.rowHeight
         tableView.intercellSpacing = .zero
         tableView.dataSource = self
         tableView.delegate = self
@@ -61,6 +68,7 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
         scrollView.autoresizingMask = [.width, .height]
         addSubview(scrollView)
         footer.onAdd = { [weak self] in self?.delegate?.sidebarDidRequestNew() }
+        footer.onRunAll = { [weak self] in self?.delegate?.sidebarDidRequestRunAllCommands() }
         addSubview(footer)
         copyTools.onAction = { [weak self] target in self?.delegate?.sidebarDidRequestCopy(target) }
         copyTools.onToggleAutoCopy = { [weak self] in self?.delegate?.sidebarDidToggleAutoCopy() }
@@ -92,6 +100,81 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
         let below = footerH + toolsH
         scrollView.frame = NSRect(x: 0, y: below, width: bounds.width,
                                   height: max(0, bounds.height - below))
+        updateRowMetrics()
+    }
+
+    /// Re-lays the rows out for the current width, but only when that actually changes them —
+    /// a drag fires this on every pixel, and most pixels change nothing.
+    private func updateRowMetrics() {
+        let next = TerminalRowView.Metrics.forWidth(bounds.width,
+                                                    fullRowHeight: CGFloat(ConfigStore.shared.config.sidebar.rowHeight))
+        guard next != rowMetrics else { return }
+        rowMetrics = next
+        reloadAll()
+        // The thumbnails were rendered for the old size; draw them at the new one now rather
+        // than on the next output.
+        refreshVisibleThumbnails(force: true)
+    }
+
+    // MARK: Run buttons
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = hoverTracking { removeTrackingArea(existing) }
+        let area = NSTrackingArea(rect: bounds,
+                                  options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let over = runButtonRow(at: event.locationInWindow)
+        if hoveredRow !== over?.view { hoveredRow?.runHovered = false }
+        hoveredRow = over?.view
+        hoveredRow?.runHovered = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hoveredRow?.runHovered = false
+        hoveredRow = nil
+    }
+
+    /// The row whose run button is under a window point, if any.
+    private func runButtonRow(at windowPoint: NSPoint) -> (id: String, view: TerminalRowView)? {
+        let p = tableView.convert(windowPoint, from: nil)
+        let row = tableView.row(at: p)
+        guard row >= 0, let id = registry.id(at: row),
+              let view = tableView.rowView(atRow: row, makeIfNecessary: false) as? TerminalRowView,
+              view.runButtonRect.contains(view.convert(windowPoint, from: nil)) else { return nil }
+        return (id, view)
+    }
+
+    /// The point of the click being handled, for telling a click on a row's button from one on
+    /// the row.
+    private var clickedRunButton: String? {
+        guard let event = NSApp.currentEvent else { return nil }
+        return runButtonRow(at: event.locationInWindow)?.id
+    }
+
+    /// For tests: presses a row's run button the way a click would.
+    func pressRunButton(for id: String) -> Bool {
+        guard let row = registry.index(of: id),
+              let view = tableView.rowView(atRow: row, makeIfNecessary: true) as? TerminalRowView,
+              view.showsRunButton else { return false }
+        delegate?.sidebarDidRequestRunCommands(id)
+        return true
+    }
+
+    /// For tests: what a row currently shows, and the footer's Run All state.
+    func describeRow(_ id: String) -> String {
+        guard let row = registry.index(of: id),
+              let view = tableView.rowView(atRow: row, makeIfNecessary: true) as? TerminalRowView else { return "missing" }
+        let thumb = view.metrics.thumbnail.map { "\(Int($0.width))x\(Int($0.height))" } ?? "hidden"
+        return "thumb=\(thumb) height=\(Int(tableView.rowHeight)) text=\(view.metrics.showsText) "
+            + "run=\(view.showsRunButton) pending=\(view.runPending) runAll=\(footer.runAllEnabled)"
     }
 
     // MARK: Copy tools
@@ -118,7 +201,11 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
     // MARK: Refresh
 
     func reloadAll() {
-        tableView.rowHeight = CGFloat(ConfigStore.shared.config.sidebar.rowHeight)
+        rowMetrics = TerminalRowView.Metrics.forWidth(bounds.width > 0 ? bounds.width : TerminalRowView.Metrics.fullWidth,
+                                                      fullRowHeight: CGFloat(ConfigStore.shared.config.sidebar.rowHeight))
+        tableView.rowHeight = rowMetrics.rowHeight
+        hoveredRow = nil
+        updateRunAll()
         tableView.reloadData()
         syncSelection()
         kickTimer()
@@ -128,9 +215,16 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
     /// refreshes cell views, and all of this row's drawing lives in the row view itself.
     func reloadRow(_ id: String) {
         guard let row = registry.index(of: id), row < tableView.numberOfRows else { return }
+        updateRunAll()
         guard let view = tableView.rowView(atRow: row, makeIfNecessary: false) as? TerminalRowView else { return }
         configure(view, row: row)
         view.needsDisplay = true
+    }
+
+    private func updateRunAll() {
+        footer.runAllEnabled = registry.order.contains {
+            !(registry.definition($0)?.commands(isReopen: false).isEmpty ?? true)
+        }
     }
 
     func syncSelection() {
@@ -188,6 +282,7 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
     @discardableResult
     func refreshVisibleThumbnails(force: Bool) -> Bool {
         guard !isHidden, window?.occlusionState.contains(.visible) ?? false else { return false }
+        guard let thumbSize = rowMetrics.thumbnail else { return false }
         let range = tableView.rows(in: scrollView.contentView.bounds)
         guard range.length > 0 else { return false }
         let colors = ConfigStore.shared.config.colors
@@ -204,9 +299,10 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
             let src = source(for: id)
             let before = src.renderCount
             _ = src.refresh(terminal: pane.terminalView.getTerminal(),
-                            size: TerminalRowView.thumbnailSize, scale: scale,
+                            size: thumbSize, scale: scale,
                             colors: colors, showCursor: pane.isActive,
-                            background: pane.environmentBackground, force: force)
+                            background: pane.environmentBackground,
+                            columns: pane.scrollHost.visibleColumns, force: force)
             if src.renderCount != before {
                 didRender = true
                 reloadRow(id)
@@ -228,7 +324,10 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
     private func configure(_ view: TerminalRowView, row: Int) {
         guard let id = registry.id(at: row), let def = registry.definition(id) else { return }
         let pane = registry.pane(for: id)
+        view.metrics = rowMetrics
         view.number = row + 1
+        view.hasStartupCommands = !def.commands(isReopen: false).isEmpty
+        view.runPending = pane?.hasPendingCommands ?? false
         view.isOpen = pane != nil
         view.isBusy = pane?.hasRunningJob ?? false
         view.isActivePane = (id == activeID)
@@ -242,14 +341,19 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
         let colors = config.colors
         let scale = window?.backingScaleFactor ?? 2
         let background = config.background(for: def.environment)
+        guard let thumbSize = rowMetrics.thumbnail else {
+            view.thumbnail = nil
+            return
+        }
         if let pane {
             view.thumbnail = source(for: id).refresh(terminal: pane.terminalView.getTerminal(),
-                                                     size: TerminalRowView.thumbnailSize,
+                                                     size: thumbSize,
                                                      scale: scale, colors: colors,
                                                      showCursor: pane.isActive,
-                                                     background: background)
+                                                     background: background,
+                                                     columns: pane.scrollHost.visibleColumns)
         } else {
-            view.thumbnail = source(for: id).setRecipe(def, size: TerminalRowView.thumbnailSize,
+            view.thumbnail = source(for: id).setRecipe(def, size: thumbSize,
                                                        scale: scale, colors: colors,
                                                        background: background)
         }
@@ -287,13 +391,17 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
     @objc private func rowClicked() {
         let row = tableView.clickedRow
         guard row >= 0, let id = registry.id(at: row) else { return }
+        if clickedRunButton == id {
+            delegate?.sidebarDidRequestRunCommands(id)
+            return
+        }
         if registry.isOpen(id) { delegate?.sidebarDidActivate(id) }
         else { delegate?.sidebarDidRequestOpen(id) }
     }
 
     @objc private func rowDoubleClicked() {
         let row = tableView.clickedRow
-        guard row >= 0, let id = registry.id(at: row) else { return }
+        guard row >= 0, let id = registry.id(at: row), clickedRunButton != id else { return }
         delegate?.sidebarDidRequestSettings(id)
     }
 
@@ -324,6 +432,13 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
         openItem.representedObject = id
         openItem.target = self
         menu.addItem(openItem)
+        let runItem = NSMenuItem(title: "Run Startup Commands", action: #selector(contextRunCommands(_:)),
+                                 keyEquivalent: "")
+        runItem.representedObject = id
+        runItem.target = self
+        runItem.isEnabled = !(registry.definition(id)?.commands(isReopen: false).isEmpty ?? true)
+        menu.autoenablesItems = false
+        menu.addItem(runItem)
         menu.addItem(.separator())
         for (title, sel) in [("Terminal Settings…", #selector(contextSettings(_:))),
                              ("Duplicate", #selector(contextDuplicate(_:))),
@@ -373,6 +488,9 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
     @objc private func contextToggleOpen(_ sender: Any?) {
         guard let id = contextID(sender) else { return }
         registry.isOpen(id) ? delegate?.sidebarDidRequestClose(id) : delegate?.sidebarDidRequestOpen(id)
+    }
+    @objc private func contextRunCommands(_ sender: Any?) {
+        contextID(sender).map { delegate?.sidebarDidRequestRunCommands($0) }
     }
     @objc private func contextSettings(_ sender: Any?) {
         contextID(sender).map { delegate?.sidebarDidRequestSettings($0) }

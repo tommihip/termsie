@@ -18,6 +18,9 @@ struct TerminalDefinition: Codable, Equatable {
     var runCommandsOnReopen: Bool = true
     /// Whether this terminal gets its own shell history file.
     var isolatedHistory: Bool = true
+    /// Set in this terminal's shell when it starts, whether or not the startup commands run.
+    /// Overrides a workspace variable of the same name.
+    var env: [EnvVar] = []
     /// Font overrides. Either may be nil to inherit the corresponding global setting.
     var fontFamily: String?
     var fontSize: Double?
@@ -64,6 +67,7 @@ struct TerminalDefinition: Codable, Equatable {
         startupCommands = try c.decodeIfPresent([String].self, forKey: .startupCommands) ?? []
         runCommandsOnReopen = try c.decodeIfPresent(Bool.self, forKey: .runCommandsOnReopen) ?? true
         isolatedHistory = try c.decodeIfPresent(Bool.self, forKey: .isolatedHistory) ?? true
+        env = try c.decodeIfPresent([EnvVar].self, forKey: .env) ?? []
         environment = try c.decodeIfPresent(String.self, forKey: .environment)
         fontFamily = try c.decodeIfPresent(String.self, forKey: .fontFamily)
         fontSize = try c.decodeIfPresent(Double.self, forKey: .fontSize)
@@ -116,13 +120,17 @@ struct TabLayout: Codable, Equatable {
 
     var version: Int = TabLayout.currentVersion
     var terminals: [TerminalDefinition] = []
+    /// Defaults shared by every terminal in the tab, including its environment variables.
+    var settings = WorkspaceSettings()
     /// Id of the terminal that was focused.
     var selected: String?
     /// The workspace this tab came from, so session restore can keep the association.
     var workspaceName: String?
 
-    init(terminals: [TerminalDefinition] = [], selected: String? = nil, workspaceName: String? = nil) {
+    init(terminals: [TerminalDefinition] = [], settings: WorkspaceSettings = WorkspaceSettings(),
+         selected: String? = nil, workspaceName: String? = nil) {
         self.terminals = terminals
+        self.settings = settings
         self.selected = selected
         self.workspaceName = workspaceName
     }
@@ -131,6 +139,7 @@ struct TabLayout: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? TabLayout.currentVersion
         terminals = try c.decodeIfPresent([TerminalDefinition].self, forKey: .terminals) ?? []
+        settings = try c.decodeIfPresent(WorkspaceSettings.self, forKey: .settings) ?? WorkspaceSettings()
         selected = try c.decodeIfPresent(String.self, forKey: .selected)
         workspaceName = try c.decodeIfPresent(String.self, forKey: .workspaceName)
     }
@@ -156,6 +165,11 @@ struct TabLayout: Codable, Equatable {
 
     var isEmpty: Bool { terminals.isEmpty }
 
+    /// Every Keychain reference this tab's secrets use.
+    var secretRefs: Set<String> {
+        Set((settings.env + terminals.flatMap(\.env)).compactMap { $0.secret ? $0.secretRef : nil })
+    }
+
     /// A copy with startup commands removed, for the cases that must not re-run anything.
     func strippingCommands() -> TabLayout {
         var copy = self
@@ -163,17 +177,19 @@ struct TabLayout: Codable, Equatable {
         return copy
     }
 
-    /// A copy with fresh ids, so opening the same workspace twice does not make two live
-    /// terminals share one history file.
-    func regeneratingIDs() -> TabLayout {
+    /// A copy with fresh ids for the terminals whose id is in `taken` (all of them when nil), so
+    /// opening the same workspace twice does not make two live terminals share one history file.
+    /// Ids not taken are kept: they are what carries a terminal's history and output over.
+    func regeneratingIDs(avoiding taken: Set<String>? = nil) -> TabLayout {
         var copy = self
         var remap: [String: String] = [:]
         for i in copy.terminals.indices {
+            if let taken, !taken.contains(copy.terminals[i].id) { continue }
             let fresh = TerminalDefinition.newID()
             remap[copy.terminals[i].id] = fresh
             copy.terminals[i].id = fresh
         }
-        copy.selected = copy.selected.flatMap { remap[$0] }
+        copy.selected = copy.selected.map { remap[$0] ?? $0 }
         return copy
     }
 

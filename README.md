@@ -39,9 +39,9 @@ again.
 |  |  |
 | --- | --- |
 | **Floating terminals** | Drag by the header, resize from any edge, overlap however you like. Edges snap to the window and to each other. Tile, cascade, or throw one to a half of the screen when you want order back. |
-| **A terminal list that shows what is happening** | Every terminal, open or closed, with a live thumbnail of its screen, its working directory, and what is running in it. Drawn from the character buffer, so it costs almost nothing when idle. |
+| **A terminal list that shows what is happening** | Every terminal, open or closed, with a live thumbnail of its screen, its working directory, and what is running in it. Drawn from the character buffer, so it costs almost nothing when idle. Drag its edge narrower and the thumbnails shrink, then give way to just the names, then to just the numbers. |
 | **Environments** | Tag a terminal production, staging, development, or anything you define. Its background, header, badge and list row all take that colour. |
-| **Saved terminals** | Each terminal keeps a working folder and commands to run on open, like activating a virtualenv. Close it and it stays in the list; click to bring it back exactly as it was. |
+| **Saved terminals** | Each terminal keeps a working folder and commands to run on open, like activating a virtualenv — or on demand, with the ▶ beside it in the list or **Run All** for the whole workspace. Close it and it stays in the list; click to bring it back exactly as it was, with the end of its output still on screen. |
 | **Its own command history** | Press Up in a terminal and you get what *you* typed *there*. No changes to your dotfiles required. |
 | **Copy tools** | Copy one command, everything it printed, or the whole terminal since the last `clear`, from the list or a keystroke. Selections can go to the clipboard the moment you make them, and they stay put while output keeps arriving. |
 | **Workspaces** | Save a whole window of terminals to a file. New, Save, Save As, and a prompt before you throw away unsaved changes. |
@@ -116,6 +116,7 @@ You get one terminal and an empty list. From there:
 | New terminal, then tile everything | ⌃⌘D |
 | Duplicate terminal | ⇧⌘D |
 | Terminal settings | ⌘I |
+| Workspace settings | ⌥⌘, |
 | Set terminal name | ⌥⌘R |
 | Close terminal / delete terminal | ⌘W / ⌘⌫ |
 | Close window | ⇧⌘W |
@@ -195,6 +196,7 @@ Every key is optional.
   "shell": null,
   "shellArgs": ["-l"],
   "scrollback": 10000,
+  "restoredOutputLines": 1000,
   "renderer": "metal",
   "cursorStyle": "block",
   "bell": "visual",
@@ -276,6 +278,14 @@ Every key is optional.
   blank screen below the last line.
 - `updates.checkAutomatically` (also in Settings ▸ General): look for a new release once a day and
   offer to install it. See [Updates](#updates).
+- `restoredOutputLines` (also in Settings ▸ General): how many lines of each terminal's output are
+  kept when it closes and shown again when it reopens — after closing the terminal, its workspace,
+  or Termsie. `0` keeps nothing. A workspace can set its own. See
+  [Output that survives closing](#output-that-survives-closing).
+- `startupCommands.askBeforeRunning` (also in Settings ▸ General): when a workspace or the last
+  session opens, ask whether to run its startup commands. The question comes as a sheet once the
+  window is on screen, and the shells wait for the answer, so Run Commands runs them exactly as an
+  unasked open would.
 
 Colors live under `colors`, including `sidebarBackground`, `sidebarSelection`, and the 16-entry
 `ansi` palette.
@@ -321,6 +331,53 @@ workspace saved on a large display still opens sensibly on a laptop. `z` is the 
 `padding` and `lineWrap` override the corresponding global setting for that terminal alone; leave
 one out to inherit it. See `examples/workspace.json`.
 
+### Workspace settings and environment variables
+
+**Workspaces ▸ Workspace Settings…** (⌥⌘,) configures the whole tab in one place, in two views of
+the same thing:
+
+- **Form** — a list of *Workspace defaults* plus each terminal, with fields for its name, folder,
+  environment, startup commands, font, wrapping, padding and environment variables. Terminals can
+  be added and removed here too.
+- **JSON** — the same settings as one document, for editing by hand or handing to a tool. Every key
+  is always present and `null` means "inherit", so the text documents its own schema. Unknown keys
+  are errors rather than silently dropped.
+
+Edits collect in a draft and reach the tab on **Apply** (⌘↩); **Revert** drops them. Workspace
+defaults (`fontFamily`, `fontSize`, `padding`, `lineWrap`) sit between the global settings and each
+terminal's own: terminal → workspace → global. `restoredOutputLines` is a workspace-wide setting
+only: how many lines of output each of its terminals keeps between closing and reopening. The app-wide settings are one click away under
+**Global Settings…**.
+
+```json
+{
+  "workspace": { "fontSize": 14, "env": [{ "name": "AWS_PROFILE", "value": "staging" }] },
+  "terminals": [
+    { "id": "t-fullstack-api", "name": "api", "cwd": "~/src/api",
+      "startupCommands": ["go run ./cmd/api"],
+      "env": [{ "name": "PORT", "value": "8080" }, { "name": "API_TOKEN", "secret": true }] }
+  ]
+}
+```
+
+A terminal without an `id` is new; one missing from the list is deleted (Termsie asks first).
+`env` also accepts the shorthand `{"PORT": "8080"}` for plain variables, and `startupCommands` a
+single string with one command per line.
+
+**Environment variables** are set in the shell's environment when a terminal starts — whether or
+not its startup commands run — so they never pass through the shell history or the screen. A
+workspace variable applies to every terminal; a terminal's own variable of the same name wins.
+Names starting with `TERMSIE_` are reserved. Changing a variable reaches a running terminal the
+next time it starts.
+
+**Secrets** (the *Secret* box, or `"secret": true`) keep their value in your login Keychain, not in
+the workspace file or session: the file stores only an opaque `secretRef`. The value is never shown
+again — not in the form, not in the JSON view. To set or replace one in JSON, add a `"value"`; on
+Apply it moves to the Keychain and disappears from the text. A secret removed from a workspace is
+deleted from the Keychain once no open tab or saved workspace refers to it. A workspace file opened
+on another Mac has the reference but not the value; the terminal says which secrets are missing.
+Like any environment variable, a secret is visible to processes running as you (`ps -E`).
+
 Older files that used the original nested split-tree format still open; their panes become floating
 terminals in the same positions. `examples/legacy-v1-workspace.json` is one.
 
@@ -351,14 +408,41 @@ Startup commands run from that same shim, once, just before the first prompt. Th
 so their output is never unattributed, and added to that terminal's history so the up arrow brings
 them back (`recordInHistory: false` keeps them out). Interrupting one with Ctrl-C skips the rest and
 leaves a normal prompt. When a workspace or the last session opens, Termsie asks whether to run them
-or open the terminals without them (`askBeforeRunning: false` always runs). They are not typed into the
+or open the terminals without them (`askBeforeRunning: false` always runs). The question waits
+until the window is showing, and the shells wait for the answer. They are not typed into the
 terminal, which matters: typing several commands at once feeds later lines into the standard input
 of whatever the earlier one started.
+
+The ▶ beside a terminal in the list runs its commands on demand, and **Run All** under the list
+(or **Shell ▸ Run All Startup Commands**) runs every terminal's, after asking. A closed terminal
+is opened and runs them from the shim as above. An open one has a shell sitting at a prompt
+already, so there they have to be typed — one at a time, each only once the shell is back in the
+foreground, so a terminal busy with a server runs them when the server stops rather than feeding
+them to it.
 
 Bash gets `HISTFILE` plus a one-shot prompt hook; fish gets its own session history; any other
 shell gets `HISTFILE` alone. Anything unrecognized or ambiguous falls back to leaving your shell
 completely untouched — a terminal with shared history is a missing feature, a terminal with a
 broken `PATH` is a broken app.
+
+### Output that survives closing
+
+A closed terminal keeps the end of its output — by default the last 1000 lines — and shows it
+again, under a dim *restored from* rule, when it reopens: after closing just that terminal, its
+workspace, or Termsie. It sits beside the terminal's history in
+`~/.config/termsie/panes/<id>/output.ansi`, readable only by you, and goes when the terminal is
+deleted.
+
+It is re-encoded from the character buffer rather than recorded from the pty. So it is small and
+safe to replay: colours and styles, but no cursor movement or half-drawn progress bars, and
+wrapped lines are rejoined so they rewrap to whatever width the terminal reopens at. The idle
+prompt the terminal was left at is dropped, since the new shell draws its own. While a full-screen
+program such as an editor is up, the screen underneath it cannot be read, so the previous copy is
+left alone rather than replaced by the editor's display.
+
+This is also why a workspace opened from its file keeps the terminal ids it was saved with — they
+name both the history and the kept output. Only a terminal whose id is already open in another
+tab (the same workspace opened twice) is given a new one.
 
 ### Copying a command, not a rectangle
 
@@ -429,17 +513,20 @@ been observed returning nil — which then detonates deep inside CoreText, far f
 Sources/Termsie/
   App/        AppDelegate, MainMenu, Config (JSON + file watcher), DebugDriver, WindowCapture, UIFonts,
               Updater (GitHub release check, signature-verified self-update)
-  Model/      TerminalDefinition (the saved terminal), TerminalRegistry (definitions ↔ live panes)
+  Model/      TerminalDefinition (the saved terminal), TerminalRegistry (definitions ↔ live panes),
+              EnvironmentVariables (EnvVar, WorkspaceSettings), SecretStore (Keychain)
   Window/     TerminalWindowController — lifecycle, focus, menus, workspace and session plumbing
   Layout/     PaneCanvasView (floating terminals), PaneChrome (hit zones), Arrange (tile/cascade),
               LayoutTree (legacy v1 decode only)
   Terminal/   TerminalPane, TermsieTerminalView, PaneHeaderView, TrafficLightsView, FindBarView,
               ProcessInspector, ShellIntegration + ShimScripts (history, startup commands, marks),
-              CommandMarks (OSC 133 stream scanner), TerminalTextCapture (buffer → clipboard)
+              CommandMarks (OSC 133 stream scanner), TerminalTextCapture (buffer → clipboard),
+              OutputSnapshot (output kept between close and reopen)
   Sidebar/    TerminalSidebarView, TerminalRowView, SidebarFooterView, SidebarCopyToolsView,
               ThumbnailRenderer, ThumbnailSource, TerminalSettingsPopover, SidebarContainerView,
               BadgeDrawing
   Session/    WorkspaceStore (v2 format), LegacyMigration (v1 split trees → terminals)
+  Workspace/  WorkspaceSettingsWindowController (form + JSON), WorkspaceDocument
   Settings/   SettingsWindowController (general, font, environments), SettingsForm, FontCatalog
 ```
 
@@ -456,11 +543,12 @@ real pseudo-terminals with `expect`.
 
 `test-app.sh` drives the real app and checks thumbnail correctness and cost, session migration,
 terminal lifecycle, startup commands, dragging and snapping, translucency, collapse, environments,
-font inheritance, workspace state, pointer ownership where terminals overlap, the copy tools under
+font inheritance, workspace state, environment variables and secrets, the workspace settings JSON, pointer ownership where terminals overlap, the copy tools under
 zsh, bash and a shell that marks nothing, and that a selection outlives the output arriving under
 it.
 
-Both use throwaway fixture directories and never touch your real configuration.
+Both use throwaway fixture directories and never touch your real configuration — nor your Keychain: under
+`--snapshot` the secret store can be pointed at a JSON file with `TERMSIE_SECRETS_FILE`.
 
 The app can drive itself, which is how the tests work:
 

@@ -148,11 +148,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func makeWindowController(layout: TabLayout?, frame: NSRect?,
                               sidebarVisible: Bool? = nil, sidebarWidth: Double? = nil,
                               workspaceName: String? = nil,
-                              runStartupCommands: Bool = true) -> TerminalWindowController {
+                              runStartupCommands: Bool = true,
+                              holdShells: Bool = false) -> TerminalWindowController {
         let controller = TerminalWindowController(layout: layout, frame: frame,
                                                   sidebarVisible: sidebarVisible, sidebarWidth: sidebarWidth,
                                                   workspaceName: workspaceName,
-                                                  runStartupCommands: runStartupCommands)
+                                                  runStartupCommands: runStartupCommands,
+                                                  holdShells: holdShells)
         controller.onClose = { [weak self] c in
             self?.controllers.removeAll { $0 === c }
             self?.scheduleSessionSave()
@@ -163,9 +165,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @discardableResult
-    func newWindow(cwd: String?, layout: TabLayout? = nil, runStartupCommands: Bool = true) -> TerminalWindowController {
+    func newWindow(cwd: String?, layout: TabLayout? = nil, runStartupCommands: Bool = true,
+                   holdShells: Bool = false) -> TerminalWindowController {
         let controller = makeWindowController(layout: layout ?? TabLayout.single(cwd: cwd), frame: nil,
-                                              runStartupCommands: runStartupCommands)
+                                              runStartupCommands: runStartupCommands, holdShells: holdShells)
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         return controller
@@ -176,41 +179,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func openWorkspace(_ workspace: Workspace, inNewTab: Bool) {
-        // Fresh ids per open, so opening the same workspace twice does not make two live
-        // terminals write into one history file.
-        var layout = workspace.layout.regeneratingIDs()
+        // The saved ids name each terminal's history and kept output, so reopening a workspace
+        // picks both up again. Only ids already live in another tab are replaced, so opening
+        // the same workspace twice does not make two terminals write into one history file.
+        let live = Set(controllers.flatMap(\.registry.order))
+        var layout = workspace.layout.regeneratingIDs(avoiding: live)
         layout.workspaceName = workspace.name
-        let run = confirmStartupCommands(in: [layout], opening: "“\(workspace.name)”")
+        let ask = shouldAskBeforeRunningStartupCommands(in: [layout])
+        let controller: TerminalWindowController
         if inNewTab, let key = keyController {
-            _ = key.addTab(layout: layout, runStartupCommands: run)
+            controller = key.addTab(layout: layout, runStartupCommands: !ask, holdShells: ask)
         } else {
-            newWindow(cwd: nil, layout: layout, runStartupCommands: run)
+            controller = newWindow(cwd: nil, layout: layout, runStartupCommands: !ask, holdShells: ask)
         }
+        if ask { controller.offerStartupCommands(for: "“\(workspace.name)”", in: [controller]) }
     }
 
-    /// Asks whether to run the startup commands of the terminals about to open. True when there
-    /// is nothing to ask about, or asking is turned off.
+    /// Whether the terminals about to open should hold their startup commands back and ask once
+    /// they are on screen, rather than run them straight away.
     ///
     /// Reopening a workspace is often just to look at it, and its commands may start servers or
     /// deploys — so running them is offered rather than assumed.
-    private func confirmStartupCommands(in layouts: [TabLayout], opening what: String) -> Bool {
-        guard ConfigStore.shared.config.startupCommands.askBeforeRunning, !DebugDriver.isActive else { return true }
-        let lines = layouts.flatMap(\.terminals).filter(\.openOnRestore).flatMap { def in
-            def.commands(isReopen: false).map { "\(def.displayName): \($0)" }
-        }
-        guard !lines.isEmpty else { return true }
-
-        let shown = 10
-        var list = lines.prefix(shown).joined(separator: "\n")
-        if lines.count > shown { list += "\n… and \(lines.count - shown) more" }
-        let alert = NSAlert()
-        alert.messageText = "Run the startup commands for \(what)?"
-        alert.informativeText = list + "\n\nSkipping opens the terminals without running anything. "
-            + "Each terminal can still run its commands later from its settings."
-        alert.addButton(withTitle: "Run Commands")
-        alert.addButton(withTitle: "Skip").keyEquivalent = "\u{1b}"
-        NSApp.activate(ignoringOtherApps: true)
-        return alert.runModal() == .alertFirstButtonReturn
+    private func shouldAskBeforeRunningStartupCommands(in layouts: [TabLayout]) -> Bool {
+        guard ConfigStore.shared.config.startupCommands.askBeforeRunning else { return false }
+        // A scripted run has nobody to answer, unless the test is about the question itself.
+        guard !DebugDriver.isActive || CommandLine.arguments.contains("--ask-startup") else { return false }
+        return layouts.flatMap(\.terminals).contains { $0.openOnRestore && !$0.commands(isReopen: false).isEmpty }
     }
 
     func openWorkspace(named name: String, inNewTab: Bool) {
@@ -260,7 +254,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func restore(_ session: SessionSnapshot) {
-        let run = confirmStartupCommands(in: session.windows.flatMap(\.tabs), opening: "the last session")
+        let ask = shouldAskBeforeRunningStartupCommands(in: session.windows.flatMap(\.tabs))
+        let run = !ask
+        var opened: [TerminalWindowController] = []
+        var front: TerminalWindowController?
         for w in session.windows {
             guard let first = w.tabs.first else { continue }
             var frame: NSRect? = nil
@@ -270,15 +267,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let controller = makeWindowController(layout: first, frame: frame,
                                                   sidebarVisible: w.sidebarVisible,
                                                   sidebarWidth: w.sidebarWidth,
-                                                  runStartupCommands: run)
+                                                  runStartupCommands: run, holdShells: ask)
             controller.showWindow(nil)
             controller.window?.makeKeyAndOrderFront(nil)
             var tabs = [controller]
-            for layout in w.tabs.dropFirst() { tabs.append(controller.addTab(layout: layout, runStartupCommands: run)) }
+            for layout in w.tabs.dropFirst() {
+                tabs.append(controller.addTab(layout: layout, runStartupCommands: run, holdShells: ask))
+            }
             if w.selectedTab < tabs.count, let win = tabs[w.selectedTab].window {
                 win.makeKeyAndOrderFront(nil)
             }
+            opened += tabs
+            front = w.selectedTab < tabs.count ? tabs[w.selectedTab] : controller
         }
+        // One question for the whole session, on the window that ends up in front.
+        if ask, let front { front.offerStartupCommands(for: "the last session", in: opened) }
     }
 
     // MARK: Menu actions

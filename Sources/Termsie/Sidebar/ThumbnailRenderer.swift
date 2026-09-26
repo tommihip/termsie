@@ -11,10 +11,16 @@ import SwiftTerm
 enum ThumbnailRenderer {
     /// Draws a screen as coloured blocks: one background run per colour change, and half-height
     /// bars for ink, which read as lines of text at this scale far better than solid blocks would.
+    ///
+    /// `columns` is the slice of the grid to draw. An unwrapped terminal's grid is far wider than
+    /// its pane, and squeezing all of it in would crowd a full screen of text into the left edge.
     static func render(terminal: Terminal, size: CGSize, scale: CGFloat,
                        colors: TermsieConfig.Colors, showCursor: Bool,
-                       background: NSColor? = nil) -> CGImage? {
-        let cols = max(terminal.cols, 1)
+                       background: NSColor? = nil, columns: Range<Int>? = nil) -> CGImage? {
+        let gridCols = max(terminal.cols, 1)
+        let window = (columns ?? 0..<gridCols).clamped(to: 0..<gridCols)
+        let first = window.isEmpty ? 0 : window.lowerBound
+        let cols = window.isEmpty ? gridCols : window.count
         let rows = max(terminal.rows, 1)
         let pw = max(Int(size.width * scale), 1)
         let ph = max(Int(size.height * scale), 1)
@@ -40,27 +46,27 @@ enum ThumbnailRenderer {
             guard let line = terminal.getLine(row: r) else { continue }
             // Flip: the context's origin is bottom-left, the terminal's row 0 is at the top.
             let y = size.height - CGFloat(r + 1) * sy
-            let limit = min(line.count, cols)
+            let limit = min(line.count, first + cols)
 
-            var runStart = 0
+            var runStart = first
             var runColor: NSColor?
             var inkStart = -1
             var inkColor: NSColor?
 
             func flushBG(_ end: Int) {
                 if let c = runColor, end > runStart, c != bg {
-                    bgRuns[c, default: []].append(CGRect(x: CGFloat(runStart) * sx, y: y,
+                    bgRuns[c, default: []].append(CGRect(x: CGFloat(runStart - first) * sx, y: y,
                                                          width: CGFloat(end - runStart) * sx, height: sy))
                 }
             }
             func flushInk(_ end: Int) {
                 if let c = inkColor, inkStart >= 0, end > inkStart {
-                    inkRuns[c, default: []].append(CGRect(x: CGFloat(inkStart) * sx, y: y + sy * 0.25,
+                    inkRuns[c, default: []].append(CGRect(x: CGFloat(inkStart - first) * sx, y: y + sy * 0.25,
                                                           width: CGFloat(end - inkStart) * sx, height: sy * 0.5))
                 }
             }
 
-            for c in 0..<limit {
+            for c in first..<max(first, limit) {
                 let cd = line[c]
                 let attr = cd.attribute
                 let style = attr.style
@@ -104,9 +110,9 @@ enum ThumbnailRenderer {
 
         if showCursor {
             let loc = terminal.getCursorLocation()
-            if loc.y >= 0, loc.y < rows, loc.x >= 0, loc.x < cols {
+            if loc.y >= 0, loc.y < rows, loc.x >= first, loc.x < first + cols {
                 ctx.setFillColor(NSColor.hex(colors.cursor).cgColor)
-                ctx.fill(CGRect(x: CGFloat(loc.x) * sx,
+                ctx.fill(CGRect(x: CGFloat(loc.x - first) * sx,
                                 y: size.height - CGFloat(loc.y + 1) * sy,
                                 width: max(sx * 1.5, 1), height: sy))
             }

@@ -49,6 +49,11 @@ final class TerminalScrollHost: NSView {
     private var measuredAt: CFTimeInterval = 0
     private var extentWork: DispatchWorkItem?
     private var wantsCursorReveal = false
+    private var lastVisibleColumns: Range<Int>?
+
+    /// Called when the slice of the grid on screen changes — a sideways scroll, or a resize of an
+    /// unwrapped terminal — since neither touches the buffer the thumbnail fingerprints.
+    var onVisibleColumnsChange: (() -> Void)?
 
     init(terminalView: TermsieTerminalView) {
         self.terminalView = terminalView
@@ -154,6 +159,11 @@ final class TerminalScrollHost: NSView {
         let frame = NSRect(x: -scrollOffset, y: 0, width: width, height: box.height)
         if terminalView.frame != frame { terminalView.frame = frame }
         updateScroller()
+        let visible = visibleColumns
+        if visible != lastVisibleColumns {
+            lastVisibleColumns = visible
+            onVisibleColumnsChange?()
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -333,6 +343,18 @@ final class TerminalScrollHost: NSView {
         next = min(max(next, 0), maxOffset)
         guard next != scrollOffset else { return }
         setOffset(next)
+    }
+
+    /// The columns actually on screen. Wrapped, that is the whole grid; unwrapped, the grid is
+    /// `unwrappedColumns` wide and only the window under the scroll offset is visible, which is
+    /// what a thumbnail should show rather than the full, mostly empty, grid.
+    var visibleColumns: Range<Int> {
+        let cols = max(terminalView.getTerminal().cols, 1)
+        guard !wrapsLines, maxOffset > 0 else { return 0..<cols }
+        let cell = cellWidth
+        let first = min(max(Int((scrollOffset / cell).rounded(.down)), 0), cols - 1)
+        let count = max(Int((textBox.width / cell).rounded(.up)), 1)
+        return first..<min(cols, first + count)
     }
 
     // MARK: Introspection

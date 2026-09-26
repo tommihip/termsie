@@ -295,6 +295,23 @@ enum DebugDriver {
             NSLog("DebugDriver readSetting: [\(title)] shown=\(state.map(String.init) ?? "-")")
         } else if action == "openSettings" {
             SettingsWindowController.shared.show()
+        } else if action.hasPrefix("applyWorkspaceJSON:"), let controller {
+            // applyWorkspaceJSON:<path>, through the Workspace Settings panel's own JSON path.
+            let path = String(action.dropFirst(19))
+            let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+            let result = controller.workspaceSettingsPanel.applyJSONForTesting(text)
+            NSLog("DebugDriver applyWorkspaceJSON: [%@]", result.replacingOccurrences(of: "\n", with: " | "))
+        } else if action.hasPrefix("openWorkspace:") {
+            AppDelegate.shared.openWorkspace(named: String(action.dropFirst(14)), inNewTab: true)
+        } else if action == "dumpAllIDs" {
+            for (i, c) in AppDelegate.shared.controllers.enumerated() {
+                NSLog("DebugDriver ids: tab=\(i) \(c.registry.order.joined(separator: ","))")
+            }
+        } else if action == "showWorkspaceDefaults", let controller {
+            controller.showWorkspaceSettings(selecting: nil)
+        } else if action == "dumpWorkspaceJSON", let controller {
+            let text = controller.workspaceSettingsPanel.renderedJSONForTesting()
+            NSLog("DebugDriver workspaceJSON: %@", text.replacingOccurrences(of: "\n", with: " "))
         } else if action == "dumpNames", let controller {
             for id in controller.registry.order {
                 let n = controller.displayedNames(for: id)
@@ -329,6 +346,30 @@ enum DebugDriver {
         } else if action.hasPrefix("deleteTerminal:"), let controller,
                   let n = Int(action.dropFirst(15)), let id = controller.registry.id(at: n - 1) {
             controller.sidebarDidRequestDelete(id)
+        } else if action.hasPrefix("setSidebarWidth:"), let controller, let w = Double(action.dropFirst(16)) {
+            controller.setSidebarWidthForTesting(CGFloat(w))
+        } else if action.hasPrefix("dumpRow:"), let controller,
+                  let n = Int(action.dropFirst(8)), let id = controller.registry.id(at: n - 1) {
+            NSLog("DebugDriver row: #\(n) \(controller.describeSidebarRow(id)) sidebar=\(Int(controller.sidebarWidth))")
+        } else if action.hasPrefix("pressRun:"), let controller,
+                  let n = Int(action.dropFirst(9)), let id = controller.registry.id(at: n - 1) {
+            NSLog("DebugDriver pressRun: #\(n) pressed=\(controller.pressRunButtonForTesting(id))")
+        } else if action == "dumpSheet" {
+            // The question asked as a sheet, on whichever window has one.
+            let sheet = NSApp.windows.compactMap(\.attachedSheet).first
+            let texts = sheet.map { Self.labels(in: $0.contentView) } ?? []
+            NSLog("DebugDriver sheet: \(sheet == nil ? "none" : texts.joined(separator: " | "))")
+        } else if action.hasPrefix("answerSheet:"), let n = Int(action.dropFirst(12)) {
+            // answerSheet:1 presses the first button of the sheet showing.
+            if let parent = NSApp.windows.first(where: { $0.attachedSheet != nil }), let sheet = parent.attachedSheet {
+                parent.endSheet(sheet, returnCode: NSApplication.ModalResponse(rawValue: 1000 + n - 1))
+            }
+        } else if action.hasPrefix("dumpText:"), let controller,
+                  let n = Int(action.dropFirst(9)), let id = controller.registry.id(at: n - 1),
+                  let pane = controller.registry.pane(for: id) {
+            let cap = TerminalTextCapture(pane.terminalView.getTerminal())
+            let text = cap.rowCount > 0 ? cap.text(rows: 0...cap.lastContentRow()) : ""
+            NSLog("DebugDriver text: #\(n) [%@]", text.replacingOccurrences(of: "\n", with: " | "))
         } else if action.hasPrefix("pane:"), let n = Int(action.dropFirst(5)) {
             let item = NSMenuItem(); item.tag = n
             controller?.focusPaneByNumber(item)
@@ -337,6 +378,16 @@ enum DebugDriver {
             let target: AnyObject? = controller?.responds(to: sel) == true ? controller : nil
             NSApp.sendAction(sel, to: target, from: nil)
         }
+    }
+
+    /// The text of every label under a view, in order, for reading a sheet's message.
+    private static func labels(in view: NSView?) -> [String] {
+        guard let view else { return [] }
+        var out: [String] = []
+        if let field = view as? NSTextField, !field.stringValue.isEmpty { out.append(field.stringValue) }
+        if let button = view as? NSButton, !button.title.isEmpty { out.append("[\(button.title)]") }
+        for sub in view.subviews { out += labels(in: sub) }
+        return out
     }
 
     /// Captures the window and, when asked, quits once the file is on disk.

@@ -23,12 +23,15 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
     private let reopenCheck = NSButton(checkboxWithTitle: "Run commands when reopening", target: nil, action: nil)
     private let historyCheck = NSButton(checkboxWithTitle: "Own command history", target: nil, action: nil)
     private let applyButton = NSButton(title: "Run Commands Now", target: nil, action: nil)
+    private let workspaceButton = NSButton(title: "Environment Variables & Workspace…", target: nil, action: nil)
 
     let popover = NSPopover()
 
     /// Called when the environment changes, so the terminal repaints immediately rather than
     /// waiting for the popover to close.
     var onEnvironmentChange: ((String, String?) -> Void)?
+    /// Opens the Workspace Settings panel on this terminal, where its variables are edited.
+    var onShowWorkspaceSettings: ((String) -> Void)?
 
     init(definitionID: String, registry: TerminalRegistry, onApply: @escaping (String, [String]) -> Void) {
         self.definitionID = definitionID
@@ -40,7 +43,7 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 520))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 550))
         let pad: CGFloat = 14
         let width = root.bounds.width - 2 * pad
         var y = root.bounds.height - pad
@@ -198,6 +201,12 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
         applyButton.action = #selector(applyNow)
         applyButton.frame = NSRect(x: pad, y: y, width: width, height: 24)
         root.addSubview(applyButton)
+        y -= 30
+        workspaceButton.bezelStyle = .rounded
+        workspaceButton.target = self
+        workspaceButton.action = #selector(showWorkspaceSettings)
+        workspaceButton.frame = NSRect(x: pad, y: y, width: width, height: 24)
+        root.addSubview(workspaceButton)
 
         view = root
         load()
@@ -335,6 +344,11 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
             self.validateFolder()
             self.commit()
         }
+    }
+
+    @objc private func showWorkspaceSettings() {
+        commit()
+        onShowWorkspaceSettings?(definitionID)
     }
 
     @objc private func applyNow() {

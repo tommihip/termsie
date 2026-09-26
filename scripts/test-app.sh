@@ -420,5 +420,180 @@ check "and the general setting shows the same value" \
       "$(print -r -- "$out" | grep 'readSetting: \[Copy a selection as soon\] shown=true')"
 check "a copy shortcut still copies"        "$(clip "$out" 1 | grep 'TOOLSHIDDEN')"
 
+print "\n== environment variables reach the shell whether or not commands run"
+# The test backend keeps secrets in a file instead of the Keychain; it only works under --snapshot.
+fix=$ROOT/envvars; mkdir -p $fix/termsie/workspaces
+print '{"s-fixture-secret":"hunter2-SECRET"}' > $fix/secrets.json
+cat > $fix/termsie/workspaces/vars.json <<JSON
+{"version":2,"name":"vars","layout":{"version":2,
+ "settings":{"env":[{"name":"WS_ONLY","value":"from-workspace"},{"name":"SHARED","value":"workspace"}]},
+ "terminals":[{"id":"t-vars","cwd":"$HOME","frame":[0,0,1,1],
+   "env":[{"name":"SHARED","value":"terminal"},
+          {"name":"API_TOKEN","secret":true,"secretRef":"s-fixture-secret"},
+          {"name":"GONE","secret":true,"secretRef":"s-not-stored"}]}]}}
+JSON
+out=$(XDG_CONFIG_HOME=$fix TERMSIE_SECRETS_FILE=$fix/secrets.json "$BIN" --workspace vars --snapshot $fix/shot.png --quit \
+  --actions "wait,wait,wait,type:echo \"\$WS_ONLY|\$SHARED|\$API_TOKEN|\${GONE-unset}\" > $fix/envout\n,wait,wait,copy:wholeTerminal,dumpClipboard,saveWorkspaceNamed:vars-saved,wait" 2>&1)
+check "workspace, terminal and secret variables are set (no startup commands)" \
+      "$([[ "$(cat $fix/envout 2>/dev/null)" == "from-workspace|terminal|hunter2-SECRET|unset" ]] && echo yes)"
+check "a secret missing from the Keychain is reported, not set" "$(print -r -- "$out" | grep 'secret GONE not found')"
+check "the saved workspace keeps the reference"  "$(grep -s 's-fixture-secret' $fix/termsie/workspaces/vars-saved.json)"
+check "and never the value"                      "$([[ -z "$(grep -rl 'hunter2-SECRET' $fix/termsie)" ]] && echo yes)"
+
+print "\n== the workspace settings JSON applies terminals, defaults and secrets"
+fix=$ROOT/wsjson; mkdir -p $fix
+print '{}' > $fix/secrets.json
+cat > $fix/a.json <<'JSON'
+{"workspace": {"fontSize": 17, "env": {"WS_VAR": "ws"}},
+ "terminals": [
+   {"name": "one", "env": [{"name": "PLAIN", "value": "p1"},
+                           {"name": "TOKEN", "secret": true, "value": "typed-SECRET"}]},
+   {"name": "two", "fontSize": 12, "startupCommands": "echo a\necho b"}]}
+JSON
+out=$(XDG_CONFIG_HOME=$fix TERMSIE_SECRETS_FILE=$fix/secrets.json "$BIN" --cwd $HOME --snapshot $fix/shot.png --quit \
+  --actions "wait,applyWorkspaceJSON:$fix/a.json,wait,wait,wait,pane:1,type:echo \"\$PLAIN|\$TOKEN|\$WS_VAR\" > $fix/envout\n,wait,dumpWorkspaceJSON,dumpFonts,dumpTerminals,saveWorkspaceNamed:applied,wait" 2>&1)
+check "the JSON applied"                        "$(print -r -- "$out" | grep 'applyWorkspaceJSON: \[ok\]')"
+check "it replaced the terminals"               "$(print -r -- "$out" | grep 'defs=2 open=2')"
+check "a new terminal gets its variables"       "$([[ "$(cat $fix/envout 2>/dev/null)" == "p1|typed-SECRET|ws" ]] && echo yes)"
+check "a startup command string becomes lines"  "$(print -r -- "$out" | grep '"startupCommands":\["echo a","echo b"\]')"
+check "the workspace font size is inherited"    "$(print -r -- "$out" | grep 'override=\[- -\] actual=\[[^]]* 17\]')"
+check "a terminal's own size still wins"        "$(print -r -- "$out" | grep 'override=\[- 12\] actual=\[[^]]* 12\]')"
+json=$(print -r -- "$out" | grep 'DebugDriver workspaceJSON')
+check "the JSON view marks the secret"          "$(print -r -- "$json" | grep '"name": "TOKEN", "secret": true')"
+check "the JSON view never shows its value"     "$([[ -n "$json" && -z "$(print -r -- "$json" | grep 'typed-SECRET')" ]] && echo yes)"
+check "the value is in the secret store"        "$(grep -s 'typed-SECRET' $fix/secrets.json)"
+check "and in no file Termsie wrote"            "$([[ -z "$(grep -rl 'typed-SECRET' $fix/termsie)" ]] && echo yes)"
+check "the workspace defaults are saved"        "$(grep -s '"fontSize" : 17' $fix/termsie/workspaces/applied.json)"
+
+print "\n== removing a secret deletes its stored value"
+fix=$ROOT/wsgc; mkdir -p $fix
+print '{}' > $fix/secrets.json
+cp $ROOT/wsjson/a.json $fix/a.json
+print '{"terminals": [{"name": "only"}]}' > $fix/b.json
+out=$(XDG_CONFIG_HOME=$fix TERMSIE_SECRETS_FILE=$fix/secrets.json "$BIN" --cwd $HOME --snapshot $fix/shot.png --quit \
+  --actions "wait,applyWorkspaceJSON:$fix/a.json,wait,applyWorkspaceJSON:$fix/b.json,wait,wait" 2>&1)
+check "both applied"                            "$([[ $(print -r -- "$out" | grep -c 'applyWorkspaceJSON: \[ok\]') == 2 ]] && echo yes)"
+check "the dropped secret left the store"       "$([[ -f $fix/secrets.json && -z "$(grep 'typed-SECRET' $fix/secrets.json)" ]] && echo yes)"
+
+print "\n== the workspace settings JSON explains what is wrong"
+fix=$ROOT/wsbad; mkdir -p $fix
+print '{"terminals": [{"name": "x", "startupCommand": ["ls"]}]}' > $fix/typo.json
+print '{"terminals": [{"env": {"TERMSIE_PANE_ID": "x"}}]}' > $fix/reserved.json
+print '{"terminals": [{"env": [{"name": "T", "secret": true}]}]}' > $fix/novalue.json
+print '{"terminals": [' > $fix/broken.json
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --cwd $HOME --snapshot $fix/shot.png --quit \
+  --actions "wait,applyWorkspaceJSON:$fix/typo.json,applyWorkspaceJSON:$fix/reserved.json,applyWorkspaceJSON:$fix/novalue.json,applyWorkspaceJSON:$fix/broken.json,dumpTerminals" 2>&1)
+check "a misspelt key is named"                 "$(print -r -- "$out" | grep 'unknown key “startupCommand” in terminals\[0\]')"
+check "a reserved variable is refused"          "$(print -r -- "$out" | grep 'TERMSIE_PANE_ID.*is reserved')"
+check "a secret without a value is refused"     "$(print -r -- "$out" | grep 'secret “T” has no stored value')"
+check "broken JSON is reported"                 "$(print -r -- "$out" | grep 'applyWorkspaceJSON: \[not valid JSON')"
+check "and nothing was applied"                 "$(print -r -- "$out" | grep 'defs=1 open=1')"
+
+print "\n== the terminal list can be narrowed until only the numbers are left"
+fix=$ROOT/narrow; mkdir -p $fix
+out=$(run $fix "wait,dumpRow:1,setSidebarWidth:420,wait,dumpRow:1,setSidebarWidth:230,wait,dumpRow:1,setSidebarWidth:190,wait,dumpRow:1,setSidebarWidth:60,wait,dumpRow:1,setSidebarWidth:10,wait,dumpRow:1" --cwd $HOME)
+rows=(${(f)"$(print -r -- "$out" | grep 'DebugDriver row: #1')"})
+check "the default width shows a full thumbnail"     "$(print -r -- "${rows[1]}" | grep 'thumb=104x65 height=84 text=true.*sidebar=264')"
+check "wider does not grow the thumbnail"            "$(print -r -- "${rows[2]}" | grep 'thumb=104x65 height=84.*sidebar=420')"
+check "narrower shrinks it, keeping its shape"       "$(print -r -- "${rows[3]}" | grep 'thumb=70x44 .*sidebar=230')"
+check "too small to read, it is hidden"              "$(print -r -- "${rows[4]}" | grep 'thumb=hidden height=40 text=true.*sidebar=190')"
+check "narrower still, only the number is left"      "$(print -r -- "${rows[5]}" | grep 'thumb=hidden height=40 text=false.*sidebar=60')"
+check "and the list stops at its minimum width"      "$(print -r -- "${rows[6]}" | grep 'sidebar=44')"
+
+print "\n== each terminal can run its startup commands on demand, or all at once"
+fix=$ROOT/runbtn; mkdir -p $fix/termsie/workspaces
+print '{"startupCommands":{"askBeforeRunning":false}}' > $fix/termsie/config.json
+cat > $fix/termsie/workspaces/dev.json <<JSON
+{"version":2,"name":"dev","layout":{"version":2,"terminals":[
+ {"id":"t-run-api","name":"api","cwd":"$HOME","startupCommands":["echo api >> $fix/ran"],"runCommandsOnReopen":false,"frame":[0,0,0.5,1]},
+ {"id":"t-run-web","name":"web","cwd":"$HOME","frame":[0.5,0,0.5,1]},
+ {"id":"t-run-db","name":"db","cwd":"$HOME","startupCommands":["echo db >> $fix/ran"],"openOnRestore":false,"frame":[0.5,0,0.5,1]}]}}
+JSON
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --workspace dev --snapshot $fix/shot.png --quit \
+  --actions "wait,wait,dumpRow:2,pressRun:1,wait,wait,pressRun:2,pressRun:3,wait,wait,wait,dumpTerminals" 2>&1)
+check "a terminal without commands has no button"    "$(print -r -- "$out" | grep 'pressRun: #2 pressed=false')"
+check "and Run All knows some terminal has them"     "$(print -r -- "$out" | grep 'row: #2 .*run=false.*runAll=true')"
+check "the button runs an open terminal's commands"  "$([[ $(grep -c '^api$' $fix/ran 2>/dev/null) == 2 ]] && echo yes)"
+check "and opens a closed terminal to run its own"   "$(print -r -- "$out" | grep 'state: t-run-api=open t-run-web=open t-run-db=open')"
+check "which ran"                                    "$(grep -s '^db$' $fix/ran)"
+rm -f $fix/ran
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --workspace dev --snapshot $fix/shot.png --quit \
+  --actions "wait,wait,runAllStartupCommandsAction,wait,wait,wait,wait" 2>&1)
+check "Run All runs every terminal's commands"       "$([[ $(grep -c '^api$' $fix/ran) == 2 && $(grep -c '^db$' $fix/ran) == 1 ]] && echo yes)"
+rm -f $fix/ran
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --workspace dev --snapshot $fix/shot.png --quit \
+  --actions "wait,wait,type:sleep 5\n,wait,wait,wait,pressRun:1,dumpRow:1,pressRun:1,wait,wait,wait,wait,wait,wait,wait,wait,dumpRow:1" 2>&1)
+rows=(${(f)"$(print -r -- "$out" | grep 'DebugDriver row: #1')"})
+check "a busy terminal queues them"                  "$(print -r -- "${rows[1]}" | grep 'pending=true')"
+check "they run once its program finishes"           "$(print -r -- "${rows[2]}" | grep 'pending=false')"
+check "and a second press while queued runs nothing" "$([[ $(grep -c '^api$' $fix/ran) == 2 ]] && echo yes)"
+
+print "\n== the startup-commands question comes once the workspace is open"
+fix=$ROOT/ask; mkdir -p $fix/termsie/workspaces
+cat > $fix/termsie/workspaces/dev.json <<JSON
+{"version":2,"name":"dev","layout":{"version":2,"terminals":[
+ {"id":"t-ask-api","name":"api","cwd":"$HOME","startupCommands":["echo SECRET-LOOKING-COMMAND >> $fix/ran"],"frame":[0,0,1,1]}]}}
+JSON
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --workspace dev --ask-startup --snapshot $fix/shot.png --quit \
+  --actions "wait,dumpTerminals,dumpSheet,wait,dumpText:1,answerSheet:1,wait,wait,wait,dumpText:1" 2>&1)
+texts=(${(f)"$(print -r -- "$out" | grep 'DebugDriver text: #1')"})
+check "the workspace is already open when it asks"   "$(print -r -- "$out" | grep 'defs=1 open=1')"
+check "it asks, as a sheet on the window"            "$(print -r -- "$out" | grep 'sheet: Run the startup commands for “dev”?')"
+check "without listing the commands"                 "$(print -r -- "$out" | grep 'DebugDriver sheet' | grep -v 'SECRET-LOOKING')"
+check "Run Commands runs them"                       "$(grep -s 'SECRET-LOOKING-COMMAND' $fix/ran)"
+check "the shell waited for the answer"              "$(print -r -- "${texts[1]}" | grep 'text: #1 \[\]')"
+check "then ran them itself, not typed in"          "$(print -r -- "${texts[2]}" | grep '\[> echo SECRET-LOOKING-COMMAND')"
+rm -f $fix/ran
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --workspace dev --ask-startup --snapshot $fix/shot.png --quit \
+  --actions "wait,answerSheet:2,wait,wait,wait,dumpSheet" 2>&1)
+check "Skip runs nothing"                            "$([[ ! -f $fix/ran ]] && echo yes)"
+check "and the question is gone"                     "$(print -r -- "$out" | grep 'sheet: none')"
+
+print "\n== a terminal's output is kept between closing and reopening"
+fix=$ROOT/keep; mkdir -p $fix/termsie
+print '{"restoredOutputLines":5}' > $fix/termsie/config.json
+cat > $fix/p.sh <<'SH'
+for i in 1 2 3 4 5 6 7 8; do echo "kept-$i"; done
+printf '\033[31mKEPT-RED\033[0m\n'
+SH
+out=$(run $fix "wait,type:sh $fix/p.sh\n,wait,wait,closeTerminal:1,wait,openTerminal:1,wait,closeTerminal:1,wait,openTerminal:1,wait,wait,dumpText:1" --cwd $HOME)
+text=$(print -r -- "$out" | grep 'DebugDriver text: #1')
+kept=$(find $fix/termsie/panes -name output.ansi 2>/dev/null | head -1)
+check "reopening shows the output again"             "$(print -r -- "$text" | grep 'kept-8 | KEPT-RED | ── restored from')"
+check "only as many lines as configured"             "$(print -r -- "$text" | grep '\[kept-5 |')"
+check "the prompt it was left at is not kept"        "$(print -r -- "$text" | grep -v 'p.sh')"
+check "reopening twice does not stack up rules"      "$([[ $(print -r -- "$text" | grep -o 'restored from' | wc -l | tr -d ' ') == 1 ]] && echo yes)"
+check "colours are kept"                             "$([[ -n "$kept" ]] && grep -q $'\e\\[0;31mKEPT-RED' $kept && echo yes)"
+check "only the user can read it"                    "$([[ -n "$kept" && $(stat -f %Lp $kept) == 600 ]] && echo yes)"
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --snapshot $fix/shot.png --actions "wait,wait,dumpText:1" --quit 2>&1)
+check "and survives quitting Termsie"                "$(print -r -- "$out" | grep 'DebugDriver text: #1.*KEPT-RED')"
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --snapshot $fix/shot.png --actions "wait,newTerminalAction,wait,deleteTerminal:1,wait" --quit 2>&1)
+check "deleting the terminal deletes it"             "$([[ ! -f $kept ]] && echo yes)"
+
+fix=$ROOT/keepoff; mkdir -p $fix/termsie
+print '{"restoredOutputLines":0}' > $fix/termsie/config.json
+out=$(run $fix "wait,type:echo NOT-KEPT\n,wait,closeTerminal:1,wait,openTerminal:1,wait,dumpText:1" --cwd $HOME)
+check "0 keeps nothing"                              "$(print -r -- "$out" | grep 'DebugDriver text: #1' | grep -v 'NOT-KEPT')"
+check "and writes nothing"                           "$([[ -z "$(find $fix/termsie/panes -name output.ansi 2>/dev/null)" ]] && echo yes)"
+
+print "\n== a workspace keeps its terminals' output, and sets how much"
+fix=$ROOT/wskeep; mkdir -p $fix/termsie/workspaces
+cat > $fix/termsie/workspaces/dev.json <<JSON
+{"version":2,"name":"dev","layout":{"version":2,"terminals":[{"id":"t-keep-one","cwd":"$HOME","frame":[0,0,1,1]}]}}
+JSON
+XDG_CONFIG_HOME=$fix "$BIN" --workspace dev --snapshot $fix/shot.png --actions "wait,type:echo WS-KEPT\n,wait,wait" --quit >/dev/null 2>&1
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --workspace dev --snapshot $fix/shot.png --actions "wait,wait,dumpText:1,openWorkspace:dev,wait,dumpAllIDs" --quit 2>&1)
+check "reopening the workspace shows its output"     "$(print -r -- "$out" | grep 'DebugDriver text: #1.*WS-KEPT')"
+check "because its terminals keep their ids"         "$(print -r -- "$out" | grep 'ids: tab=0 t-keep-one$')"
+check "a second copy gets its own"                   "$(print -r -- "$out" | grep 'ids: tab=1 t-' | grep -v 't-keep-one')"
+print '{"workspace":{"restoredOutputLines":2},"terminals":[{"id":"t-keep-one","cwd":"~"}]}' > $fix/two.json
+print '{"workspace":{"restoredOutputLines":1.5},"terminals":[{"id":"t-keep-one"}]}' > $fix/frac.json
+print 'for l in a b c d; do echo $l; done' > $fix/four.sh
+out=$(XDG_CONFIG_HOME=$fix "$BIN" --workspace dev --snapshot $fix/shot.png --quit \
+  --actions "wait,applyWorkspaceJSON:$fix/frac.json,applyWorkspaceJSON:$fix/two.json,dumpWorkspaceJSON,type:sh $fix/four.sh\n,wait,closeTerminal:1,wait,openTerminal:1,wait,dumpText:1" 2>&1)
+check "a fractional line count is refused"           "$(print -r -- "$out" | grep 'restoredOutputLines must be a whole number')"
+check "the workspace setting applies"                "$(print -r -- "$out" | grep '"restoredOutputLines": 2')"
+check "and wins over the global one"                 "$(print -r -- "$out" | grep 'DebugDriver text: #1 \[c | d | ── restored')"
+
 print ""
 if (( fail )); then print "APP TESTS FAILED"; exit 1; else print "all app tests passed"; fi

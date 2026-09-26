@@ -13,7 +13,9 @@ final class SidebarContainerView: NSView {
     private let sidebarBackdrop = NSVisualEffectView()
     private var cursorTracking: NSTrackingArea?
 
-    static let minWidth: CGFloat = 160
+    /// Narrow enough to leave just each terminal's number and status dot. Row layout at each
+    /// width is `TerminalRowView.Metrics`.
+    static let minWidth: CGFloat = 44
     static let maxWidth: CGFloat = 420
     static let dividerWidth: CGFloat = 1
     private static let dividerGrab: CGFloat = 6

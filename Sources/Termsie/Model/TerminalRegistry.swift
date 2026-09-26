@@ -11,6 +11,8 @@ protocol TerminalRegistryDelegate: AnyObject {
     func registry(_ registry: TerminalRegistry, didClose id: String)
     /// The last definition was deleted; the window has nothing left to show.
     func registryBecameEmpty(_ registry: TerminalRegistry)
+    /// The workspace-wide defaults changed, which may change how every terminal looks.
+    func registryDidChangeSettings(_ registry: TerminalRegistry)
 }
 
 /// The terminals belonging to one window (or tab). Owns the definition list, its order, and the
@@ -24,6 +26,10 @@ final class TerminalRegistry {
     private(set) var order: [String] = []
     private var defs: [String: TerminalDefinition] = [:]
     private var live: [String: TerminalPane] = [:]
+    /// Defaults shared by every terminal in this tab.
+    var settings = WorkspaceSettings() {
+        didSet { if settings != oldValue { delegate?.registryDidChangeSettings(self) } }
+    }
 
     // MARK: Reading
 
@@ -35,6 +41,18 @@ final class TerminalRegistry {
     var openCount: Int { live.count }
 
     func definition(_ id: String) -> TerminalDefinition? { defs[id] }
+
+    /// The definition with the workspace defaults folded into whatever it leaves unset — what
+    /// the terminal should actually look like. Never saved: that would turn every inherited value
+    /// into an override.
+    func effectiveDefinition(_ id: String) -> TerminalDefinition? {
+        defs[id].map { settings.applied(to: $0) }
+    }
+
+    /// The variables a terminal's shell is started with: the workspace's, then its own.
+    func environmentVariables(for id: String) -> (values: [String: String], missing: [String]) {
+        EnvVar.resolve([settings.env, defs[id]?.env ?? []])
+    }
     func pane(for id: String) -> TerminalPane? { live[id] }
     func isOpen(_ id: String) -> Bool { live[id] != nil }
     func index(of id: String) -> Int? { order.firstIndex(of: id) }
@@ -73,6 +91,17 @@ final class TerminalRegistry {
         def.id = id
         defs[id] = def
         delegate?.registry(self, didChange: id)
+    }
+
+    /// Puts the list in exactly this order. Ids not in the list keep their relative order at
+    /// the end, so a stale caller cannot lose a terminal.
+    func reorder(_ ids: [String]) {
+        let known = ids.filter { defs[$0] != nil }
+        let rest = order.filter { !known.contains($0) }
+        let next = known + rest
+        guard next != order else { return }
+        order = next
+        delegate?.registryDidChangeOrder(self)
     }
 
     func move(_ id: String, to index: Int) {
@@ -136,7 +165,7 @@ final class TerminalRegistry {
             }
             out.append(def)
         }
-        return TabLayout(terminals: out, selected: selected)
+        return TabLayout(terminals: out, settings: settings, selected: selected)
     }
 
     /// Replaces the whole contents, used when a window is built from a layout.
@@ -144,6 +173,7 @@ final class TerminalRegistry {
         order.removeAll()
         defs.removeAll()
         live.removeAll()
+        settings = layout.settings
         for def in layout.terminals {
             defs[def.id] = def
             order.append(def.id)

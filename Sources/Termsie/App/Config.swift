@@ -191,6 +191,10 @@ struct TermsieConfig: Codable, Equatable {
     var shell: String? = nil
     var shellArgs: [String] = ["-l"]
     var scrollback: Int = 10_000
+    /// How many lines of a terminal's output are kept when it closes and shown again when it
+    /// reopens, including across quitting and reopening a workspace. 0 keeps nothing. A
+    /// workspace can set its own.
+    var restoredOutputLines: Int = 1000
     /// "metal" (GPU, default) or "coregraphics".
     var renderer: String = "metal"
     /// block | bar | underline, optionally prefixed with "blink" (e.g. "blinkBar").
@@ -255,6 +259,7 @@ struct TermsieConfig: Codable, Equatable {
         shell = try c.decodeIfPresent(String.self, forKey: .shell)
         shellArgs = try c.decodeIfPresent([String].self, forKey: .shellArgs) ?? shellArgs
         scrollback = try c.decodeIfPresent(Int.self, forKey: .scrollback) ?? scrollback
+        restoredOutputLines = try c.decodeIfPresent(Int.self, forKey: .restoredOutputLines) ?? restoredOutputLines
         renderer = try c.decodeIfPresent(String.self, forKey: .renderer) ?? renderer
         cursorStyle = try c.decodeIfPresent(String.self, forKey: .cursorStyle) ?? cursorStyle
         bell = try c.decodeIfPresent(String.self, forKey: .bell) ?? bell
@@ -289,6 +294,9 @@ struct TermsieConfig: Codable, Equatable {
     // MARK: Resolved values
 
     var nsFont: NSFont { resolvedFont(family: nil, size: nil) }
+
+    /// The most output lines a terminal can be told to keep between closing and reopening.
+    static let maxRestoredOutputLines = 100_000
 
     static let minFontSize: Double = 6
     static let maxFontSize: Double = 72
@@ -325,6 +333,12 @@ struct TermsieConfig: Codable, Equatable {
     var unwrappedColumnsValue: Double {
         get { Double(unwrappedColumns) }
         set { unwrappedColumns = Int(newValue.rounded()) }
+    }
+
+    /// `restoredOutputLines` as a Double, for the same reason.
+    var restoredOutputLinesValue: Double {
+        get { Double(restoredOutputLines) }
+        set { restoredOutputLines = Int(newValue.rounded()) }
     }
 
     var resolvedShell: String {

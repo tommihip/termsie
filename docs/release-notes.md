@@ -1,18 +1,45 @@
-Termsie 0.7.0 — universal, signed with a Developer ID and notarised by Apple.
+Termsie 0.8.0 — universal, signed with a Developer ID and notarised by Apple.
 
 ## What's new
 
-- **Auto-update.** Termsie now checks GitHub for new releases and can download,
-  verify and install them from inside the app.
-- **Close-workspace warning when creating a new one.** Creating a new workspace now
-  asks before closing the one that is currently open.
-- **Running-command warning on workspace close.** Closing a workspace warns you if
-  any of its terminals still has a command running.
+- **Environment variables per terminal and per workspace.** Each terminal can have its
+  own environment variables, and a workspace can set variables for all of its terminals.
+  If both set the same name, the terminal's value wins. They are set when the shell
+  starts, whether or not the startup commands run, so they never appear on screen or in
+  your shell history.
+- **Secrets stay out of your files.** Mark a variable as secret and its value is kept in
+  your macOS Keychain, not in the workspace file or the saved session. Once saved, the
+  value is never shown again. A secret you remove is deleted from the Keychain once
+  nothing refers to it. If a workspace is opened on a Mac that doesn't have the secret,
+  the terminal says which one is missing.
+- **Workspace Settings panel** (Workspaces ▸ Workspace Settings…, ⌥⌘,). One place to set
+  up every terminal in a workspace: name, folder, environment, startup commands, font,
+  wrapping, padding and environment variables. Terminals can be added and removed here
+  too. It has two views of the same settings:
+  - **Form** — fields for the workspace defaults and for each terminal.
+  - **JSON** — the whole workspace as one document, for editing by hand or by an AI
+    tool. Mistakes such as a misspelt key are reported instead of silently ignored.
 
-## Fixes
-
-- A terminal with a startup command that was interrupted with a break (Ctrl-C)
-  would not always run its startup command again. It now does reliably.
+  Changes take effect when you press Apply, and Revert throws them away.
+- **Workspace-wide font and layout.** A workspace can set its own font, size, line
+  wrapping and padding. Terminals use it unless they set their own, and anything left
+  unset follows the global settings.
+- **Quicker way in from a terminal.** The terminal settings popover has a new button that
+  opens the Workspace Settings panel on that terminal.
+- **Output that survives closing.** A terminal now keeps the end of its output when it
+  closes and shows it again when it reopens — after closing the terminal, its workspace, or
+  Termsie itself. Colours are kept. How much is kept is a setting (1000 lines by default,
+  0 for none) in Settings ▸ General, and each workspace can set its own in Workspace
+  Settings. Reopening a saved workspace now also brings back each terminal's own command
+  history, which it previously started afresh.
+- **Run startup commands on demand.** Each terminal in the list has a ▶ button that runs
+  its startup commands, opening it first if it is closed. **Run All**, beside New Terminal,
+  runs them for every terminal in the workspace. Both are in the Shell menu too.
+- **A resizable terminal list.** Drag its edge narrower and the thumbnails shrink, then give
+  way to just the names, and finally to just the numbers. Wider than the default, the
+  thumbnails stay the same size and the names get the room.
+- **The "run startup commands?" question comes after the workspace opens,** as a sheet on
+  its window, so you can see what you are opening. It no longer lists the commands.
 
 **Install:** download the `.dmg` below and drag Termsie to your Applications folder, or
 

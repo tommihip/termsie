@@ -20,6 +20,7 @@ final class ThumbnailSource {
     private var lastScale: CGFloat = 0
     private var lastSize: CGSize = .zero
     private var lastBackground: NSColor?
+    private var lastColumns: Range<Int>?
 
     func invalidate() {
         generations = []
@@ -60,24 +61,27 @@ final class ThumbnailSource {
     @discardableResult
     func refresh(terminal: Terminal, size: CGSize, scale: CGFloat,
                  colors: TermsieConfig.Colors, showCursor: Bool,
-                 background: NSColor? = nil, force: Bool = false) -> CGImage? {
+                 background: NSColor? = nil, columns: Range<Int>? = nil,
+                 force: Bool = false) -> CGImage? {
         let geometryChanged = size != lastSize || scale != lastScale || background != lastBackground
+            || columns != lastColumns
         guard force || geometryChanged || fingerprintChanged(terminal) || cached == nil else {
             return cached
         }
         lastSize = size
         lastScale = scale
         lastBackground = background
+        lastColumns = columns
         cached = ThumbnailRenderer.render(terminal: terminal, size: size, scale: scale,
                                           colors: colors, showCursor: showCursor,
-                                          background: background)
+                                          background: background, columns: columns)
         renderCount += 1
         return cached
     }
 
     func setRecipe(_ definition: TerminalDefinition, size: CGSize, scale: CGFloat,
                    colors: TermsieConfig.Colors, background: NSColor? = nil) -> CGImage? {
-        if cached != nil, background == lastBackground { return cached }
+        if cached != nil, background == lastBackground, size == lastSize, scale == lastScale { return cached }
         lastSize = size
         lastScale = scale
         lastBackground = background

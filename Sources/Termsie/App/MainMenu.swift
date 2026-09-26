@@ -48,6 +48,8 @@ enum MainMenu {
         shell.addItem(item("Terminal Settings…", #selector(TerminalWindowController.showTerminalSettings(_:)), "i"))
         shell.addItem(item("Set Terminal Name…", #selector(TerminalWindowController.renameActivePane(_:)), "r", [.command, .option]))
         shell.addItem(item("Clear Scrollback", #selector(TerminalWindowController.clearScrollback(_:)), "k"))
+        shell.addItem(item("Run Startup Commands", #selector(TerminalWindowController.runActiveStartupCommands(_:))))
+        shell.addItem(item("Run All Startup Commands", #selector(TerminalWindowController.runAllStartupCommandsAction(_:))))
         shell.addItem(.separator())
         shell.addItem(item("Close Terminal", #selector(TerminalWindowController.closeActivePane(_:)), "w"))
         shell.addItem(item("Delete Terminal", #selector(TerminalWindowController.deleteTerminal(_:)), String(Character(UnicodeScalar(8))), [.command]))
@@ -117,6 +119,7 @@ enum MainMenu {
         // Workspaces
         let workspaces = NSMenu(title: "Workspaces")
         workspaces.addItem(item("New Workspace", #selector(TerminalWindowController.newWorkspace(_:)), "n", [.command, .option]))
+        workspaces.addItem(item("Workspace Settings…", #selector(TerminalWindowController.showWorkspaceSettings(_:)), ",", [.command, .option]))
         workspaces.addItem(.separator())
         workspaces.addItem(item("Save Workspace", #selector(TerminalWindowController.saveWorkspace(_:)), "s"))
         workspaces.addItem(item("Save Workspace As…", #selector(TerminalWindowController.saveWorkspaceAs(_:)), "s", [.command, .shift]))

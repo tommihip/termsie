@@ -151,6 +151,8 @@ final class SidebarCopyToolsView: NSView {
         }
 
         let active = hoveredRow == row && enabled
+        // A narrow sidebar keeps the glyphs and the names; the shortcuts are in the menu anyway.
+        let showsShortcuts = bounds.width >= 150
         var tint = NSColor.hex(active ? colors.headerActiveText : colors.headerText)
         if !enabled { tint = tint.withAlphaComponent(0.35) }
         let midY = frame.midY
@@ -162,14 +164,17 @@ final class SidebarCopyToolsView: NSView {
             BadgeDrawing.drawTruncated("Auto-copy on select", font: UIFonts.system(size: 11, weight: .medium),
                                        color: autoCopyOn ? NSColor.hex(colors.headerActiveText) : tint,
                                        at: NSPoint(x: textX, y: midY - 7),
-                                       maxWidth: max(0, bounds.width - textX - 44))
-            drawShortcut("⌥⇧⌘C", rightEdge: bounds.width - 8, midY: midY, colors: colors, dim: !enabled)
+                                       maxWidth: max(0, bounds.width - textX - (showsShortcuts ? 44 : 6)))
+            if showsShortcuts {
+                drawShortcut("⌥⇧⌘C", rightEdge: bounds.width - 8, midY: midY, colors: colors, dim: !enabled)
+            }
         case .action(let target):
             drawGlyph(for: target, at: NSPoint(x: 12 + 11, y: midY), tint: tint)
             let textX: CGFloat = 12 + 22 + 8
             let shortcutRight = bounds.width - 8
-            let used = drawShortcut(shortcut(for: target), rightEdge: shortcutRight, midY: midY,
-                                    colors: colors, dim: !enabled)
+            let used = showsShortcuts
+                ? drawShortcut(shortcut(for: target), rightEdge: shortcutRight, midY: midY, colors: colors, dim: !enabled)
+                : 0
             BadgeDrawing.drawTruncated(shortLabel(for: target), font: UIFonts.system(size: 11, weight: .medium),
                                        color: tint, at: NSPoint(x: textX, y: midY - 7),
                                        maxWidth: max(0, shortcutRight - used - 6 - textX))

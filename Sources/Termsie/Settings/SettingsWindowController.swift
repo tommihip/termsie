@@ -148,6 +148,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
                              hint: "When a workspace or the last session opens, offer to run its terminals' startup commands or skip them.")
         generalForm.checkbox("Add startup commands to the terminal's history", \.startupCommands.recordInHistory,
                              hint: "So the up arrow brings them back. Takes effect in terminals opened afterwards.")
+        generalForm.number("Lines of output kept when a terminal closes", \.restoredOutputLinesValue,
+                           range: 0...Double(TermsieConfig.maxRestoredOutputLines), step: 100, isInteger: true, suffix: "lines",
+                           hint: "Shown again when the terminal reopens, even after quitting. 0 keeps nothing. A workspace can set its own in Workspace Settings.")
 
         generalForm.checkbox("Check for updates automatically", \.updates.checkAutomatically,
                              hint: "Looks for a new release once a day and asks before installing it. Termsie ▸ Check for Updates… looks right away.")

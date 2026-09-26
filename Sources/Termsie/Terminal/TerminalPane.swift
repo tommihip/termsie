@@ -72,6 +72,11 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     private var ignoreActivityUntil: CFTimeInterval = 0
     private var pendingCommands: [String] = []
     private var pendingCommandWork: DispatchWorkItem?
+    /// Whether the shell has printed anything yet, which is the sign it is ready to be typed at.
+    private var shellHasSpoken = false
+    /// Set once the output has been kept, so closing and then quitting does not save it twice.
+    private var outputSaved = false
+    private var outputRestored = false
     private var metalRequested = false
     private var shellName = "shell"
     private var integration = ShellIntegration.Plan.disabled
@@ -87,6 +92,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
             options: options)
         scrollHost = TerminalScrollHost(terminalView: terminalView)
         super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        scrollHost.onVisibleColumnsChange = { [weak self] in self?.thumbnailDirty = true }
         initialDirectory = definition.cwd
         startupCommands = runCommands ? definition.commands(isReopen: isReopen) : []
         customTitle = definition.name
@@ -161,6 +167,11 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         env["TERM_PROGRAM"] = "Termsie"
         env["TERM_PROGRAM_VERSION"] = AppInfo.version
         if env["LANG"] == nil { env["LANG"] = "en_US.UTF-8" }
+        // The workspace's and this terminal's own variables. Set at spawn rather than by the
+        // startup commands, so they are there whether or not the commands run — and a secret's
+        // value never passes through a file, the shell's history, or the screen.
+        let variables = controller?.registry.environmentVariables(for: definitionID) ?? (values: [:], missing: [])
+        env.merge(variables.values) { _, new in new }
         env["TERMSIE_PANE_ID"] = definitionID
 
         let wantsIsolation = controller?.registry.definition(definitionID)?.isolatedHistory ?? true
@@ -178,11 +189,16 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         cwdWarning = resolved.warning
         currentDirectory = resolved.path
         startedAt = CACurrentMediaTime()
+        restoreOutput()
         terminalView.startProcess(executable: config.resolvedShell, args: integration.shellArgs,
                                   environment: envList, execName: nil, currentDirectory: resolved.path)
 
         if let warning = resolved.warning {
             terminalView.feed(text: "\r\n\u{1b}[33m[\(warning)]\u{1b}[0m\r\n")
+        }
+        if !variables.missing.isEmpty {
+            let names = variables.missing.joined(separator: ", ")
+            terminalView.feed(text: "\r\n\u{1b}[33m[secret \(names) not found in the Keychain — not set]\u{1b}[0m\r\n")
         }
         // When the shim runs the startup commands there is no timing heuristic at all; the typed
         // path is only the fallback for shells we cannot shim.
@@ -211,6 +227,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     var historyKey: String { definitionID }
 
     func terminate() {
+        saveOutput()
         pollTimer?.invalidate()
         pollTimer = nil
         pendingCommandWork?.cancel()
@@ -331,13 +348,13 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     /// or this terminal's override lands in one place.
     func applyFont() {
         let config = ConfigStore.shared.config
-        let def = controller?.registry.definition(definitionID)
+        let def = controller?.registry.effectiveDefinition(definitionID)
         setFont(config.resolvedFont(family: def?.fontFamily, size: def?.fontSize))
     }
 
     /// The point size actually in use, whether inherited or overridden.
     var effectiveFontSize: Double {
-        let def = controller?.registry.definition(definitionID)
+        let def = controller?.registry.effectiveDefinition(definitionID)
         return def?.fontSize ?? ConfigStore.shared.config.font.size
     }
 
@@ -357,7 +374,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     /// `applyFont` has, and for the same reason.
     func applyTextLayout() {
         let config = ConfigStore.shared.config
-        let def = controller?.registry.definition(definitionID)
+        let def = controller?.registry.effectiveDefinition(definitionID)
         scrollHost.unwrappedColumns = config.resolvedUnwrappedColumns
         scrollHost.padding = config.resolvedPadding(def?.padding)
         scrollHost.wrapsLines = config.resolvedLineWrap(def?.lineWrap)
@@ -439,6 +456,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     }
 
     private func noteActivity() {
+        shellHasSpoken = true
         thumbnailDirty = true
         controller?.paneProducedOutput(self)
         if !pendingCommands.isEmpty {
@@ -714,11 +732,48 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         return true
     }
 
-    /// Types commands into an already-running shell, for "Apply now" in the settings editor.
+    /// Types commands into an already-running shell: "Apply now" in the settings editor, the
+    /// run button in the terminal list, and Run All.
+    ///
+    /// They wait for the shell to be in the foreground, so commands for a terminal that is busy
+    /// run once its current program finishes. A shell that has not drawn its first prompt yet is
+    /// waited for too — its startup files may still be reading the terminal.
     func runCommandsNow(_ commands: [String]) {
         guard !hasExited, !commands.isEmpty else { return }
         pendingCommands.append(contentsOf: commands)
-        scheduleCommandFlush(after: 0.05)
+        scheduleCommandFlush(after: shellHasSpoken ? 0.05 : 3.0)
+    }
+
+    /// True while typed commands are still waiting their turn.
+    var hasPendingCommands: Bool { !pendingCommands.isEmpty }
+
+    // MARK: Kept output
+
+    /// How many lines this terminal keeps between closing and reopening.
+    private var keptOutputLines: Int {
+        let config = ConfigStore.shared.config
+        return (controller?.registry.settings ?? WorkspaceSettings()).resolvedOutputLines(config)
+    }
+
+    /// Shows what this terminal held when it last closed, before its shell draws anything.
+    /// Once only; `start()` calls it too, for terminals that were not shown before starting.
+    func restoreOutput() {
+        guard !outputRestored else { return }
+        outputRestored = true
+        guard keptOutputLines > 0, let replay = OutputSnapshot.replay(key: historyKey) else { return }
+        terminalView.feed(text: replay)
+    }
+
+    /// Keeps the end of the output for next time. Called from `terminate()`, which every way of
+    /// closing a terminal passes through: closing it, its window or workspace, and quitting.
+    func saveOutput() {
+        guard !outputSaved else { return }
+        outputSaved = true
+        // The shell's own marks say whether the newest prompt is idle or ran something; the
+        // process poll alone lags a finished command by a second or so.
+        let atPrompt = !hasExited && !terminalView.markState.newestPromptOwnsACommand(liveJob: hasRunningJob)
+        OutputSnapshot.save(terminalView.getTerminal(), key: historyKey, lines: keptOutputLines,
+                            atPrompt: atPrompt)
     }
 
     func showFindBar() {

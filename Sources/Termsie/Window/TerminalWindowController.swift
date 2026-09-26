@@ -16,6 +16,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     private var configObserver: NSObjectProtocol?
     private var isClosing = false
     private var settingsPopover: TerminalSettingsPopover?
+    private var workspacePanel: WorkspaceSettingsWindowController?
     /// The workspace this tab represents, and the layout as last saved or loaded. Together they
     /// answer "does this have unsaved changes?".
     private(set) var workspaceName: String?
@@ -25,14 +26,21 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     /// otherwise deallocate the very view being dragged.
     private var isInteracting = false
     private var deferredWork: [() -> Void] = []
+    /// Terminals on screen whose shells wait for the answer to "run the startup commands?", so
+    /// the commands can still run the proper way — from the shell, before its first prompt —
+    /// rather than be typed in afterwards.
+    private var heldPanes: [TerminalPane] = []
 
     var onClose: ((TerminalWindowController) -> Void)?
     var onStateChanged: ((TerminalWindowController) -> Void)?
 
     // MARK: Init
 
+    /// - Parameter holdShells: open the terminals but start no shells until
+    ///   `startHeldTerminals(runningCommands:)`, for asking about the startup commands once the
+    ///   window is on screen.
     init(layout: TabLayout?, frame: NSRect?, sidebarVisible: Bool? = nil, sidebarWidth: Double? = nil,
-         workspaceName: String? = nil, runStartupCommands: Bool = true) {
+         workspaceName: String? = nil, runStartupCommands: Bool = true, holdShells: Bool = false) {
         let config = ConfigStore.shared.config
         headersVisible = config.showPaneHeaders
 
@@ -75,7 +83,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         let initial = layout ?? TabLayout.single()
         self.workspaceName = workspaceName ?? initial.workspaceName
         registry.load(initial)
-        build(initial, runCommands: runStartupCommands)
+        build(initial, runCommands: runStartupCommands, holdShells: holdShells)
         markSaved()
 
         configObserver = NotificationCenter.default.addObserver(forName: .termsieConfigChanged,
@@ -94,10 +102,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     /// `runCommands` false opens every terminal without its startup commands, leaving the saved
     /// commands themselves untouched.
-    private func build(_ layout: TabLayout, runCommands: Bool) {
+    private func build(_ layout: TabLayout, runCommands: Bool, holdShells: Bool) {
         container.layoutSubtreeIfNeeded()
         for def in layout.terminals where def.openOnRestore {
-            openTerminal(def.id, isReopen: false, focus: false, runCommands: runCommands)
+            openTerminal(def.id, isReopen: false, focus: false, runCommands: runCommands, startShell: !holdShells)
         }
         renumber()
         updateEmptyState()
@@ -118,7 +126,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     }
 
     private func makePane(_ def: TerminalDefinition, isReopen: Bool, runCommands: Bool) -> TerminalPane {
-        let pane = TerminalPane(config: ConfigStore.shared.config, definition: def, isReopen: isReopen,
+        let pane = TerminalPane(config: ConfigStore.shared.config,
+                                definition: registry.effectiveDefinition(def.id) ?? def, isReopen: isReopen,
                                 runCommands: runCommands)
         pane.controller = self
         pane.showsHeader = headersVisible
@@ -129,7 +138,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     // MARK: Terminal lifecycle
 
     @discardableResult
-    func openTerminal(_ id: String, isReopen: Bool, focus: Bool = true, runCommands: Bool = true) -> TerminalPane? {
+    func openTerminal(_ id: String, isReopen: Bool, focus: Bool = true, runCommands: Bool = true,
+                      startShell: Bool = true) -> TerminalPane? {
         guard let def = registry.definition(id), !registry.isOpen(id) else { return registry.pane(for: id) }
         let pane = makePane(def, isReopen: isReopen, runCommands: runCommands)
         let fraction = def.fractionalFrame ?? canvas.fraction(for: Arrange.nextSlot(in: canvas.bounds,
@@ -137,7 +147,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         canvas.add(pane, fraction: fraction)
         registry.attach(pane, to: id)
         pane.applyEnvironment()
-        pane.start()
+        if startShell {
+            pane.start()
+        } else {
+            pane.restoreOutput()
+            heldPanes.append(pane)
+        }
         renumber()
         updateEmptyState()
         sidebar.reloadAll()
@@ -261,6 +276,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     private func stateChanged() {
         updateWindowTitle()
         onStateChanged?(self)
+        workspacePanel?.workspaceDidChange()
     }
 
     // MARK: Focus
@@ -416,6 +432,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     }
 
     func thumbnailRenderCount(for id: String) -> Int { sidebar.renderCount(for: id) }
+    func setSidebarWidthForTesting(_ width: CGFloat) {
+        container.sidebarWidth = width
+        onStateChanged?(self)
+    }
+    func describeSidebarRow(_ id: String) -> String { sidebar.describeRow(id) }
+    func pressRunButtonForTesting(_ id: String) -> Bool { sidebar.pressRunButton(for: id) }
 
     /// Number of live blur views, so translucency can be asserted headlessly.
     var backdropCount: Int { container.activeBackdropCount }
@@ -511,6 +533,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         popover.onEnvironmentChange = { [weak self] defID, environment in
             self?.setEnvironment(environment, for: defID)
         }
+        popover.onShowWorkspaceSettings = { [weak self] defID in
+            self?.settingsPopover?.popover.close()
+            self?.showWorkspaceSettings(selecting: defID)
+        }
         settingsPopover = popover
         popover.show(relativeTo: rect, of: sidebar)
     }
@@ -539,6 +565,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         let confirmNeeded = ConfigStore.shared.config.confirmClosingRunningProcess && (pane?.hasRunningJob ?? false)
         let performDelete = { [weak self] in
             guard let self else { return }
+            let refs = def.env.compactMap(\.secretRef)
             if let pane { self.canvas.remove(pane) }
             self.sidebar.forgetCache(for: id)
             self.registry.remove(id)
@@ -547,6 +574,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             self.sidebar.reloadAll()
             if self.activePane === pane { self.setActivePane(self.registry.livePanes.first) }
             self.stateChanged()
+            SecretStore.discard(refs)
+            // Deleted means gone: the output it kept goes with it. (Closing keeps it.)
+            OutputSnapshot.discard(key: id)
         }
         guard confirmNeeded, let window else { performDelete(); return }
         let alert = NSAlert()
@@ -561,6 +591,136 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     func sidebarDidRequestNew() {
         newTerminal()
+    }
+
+    func sidebarDidRequestRunCommands(_ id: String) {
+        runStartupCommands(for: id, askIfBusy: true)
+    }
+
+    func sidebarDidRequestRunAllCommands() {
+        runAllStartupCommands()
+    }
+
+    // MARK: Startup commands on demand
+
+    /// The commands a terminal runs when it opens. Its "run again on reopen" setting is not
+    /// consulted: asking for them is the point.
+    private func startupCommands(of id: String) -> [String] {
+        registry.definition(id)?.commands(isReopen: false) ?? []
+    }
+
+    /// Terminals with startup commands, in list order.
+    var terminalsWithStartupCommands: [String] {
+        registry.order.filter { !startupCommands(of: $0).isEmpty }
+    }
+
+    /// Runs one terminal's startup commands now. A closed terminal is opened and runs them the
+    /// way it would on a workspace open; an open one has them typed in at its prompt.
+    func runStartupCommands(for id: String, askIfBusy: Bool, activate: Bool = true) {
+        let commands = startupCommands(of: id)
+        guard !commands.isEmpty else { NSSound.beep(); return }
+        guard let pane = registry.pane(for: id) else {
+            openTerminal(id, isReopen: false, focus: activate, runCommands: true)
+            return
+        }
+        // Once is enough: a second click while the first run is still queued would type
+        // everything twice.
+        guard !pane.hasPendingCommands else { NSSound.beep(); return }
+        let run = { [weak self, weak pane] in
+            guard let self, let pane else { return }
+            pane.runCommandsNow(commands)
+            if activate { self.setActivePane(pane) }
+            self.sidebar.reloadRow(id)
+        }
+        guard askIfBusy, pane.hasRunningJob, let window, !DebugDriver.isActive else { run(); return }
+        let alert = NSAlert()
+        alert.messageText = "“\(pane.displayTitle)” is running \(pane.foregroundJob ?? "a program")."
+        alert.informativeText = "Its startup commands will run when that finishes."
+        alert.addButton(withTitle: "Run When Finished")
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+        alert.beginSheetModal(for: window) { response in
+            if response == .alertFirstButtonReturn { run() }
+        }
+    }
+
+    /// Runs the startup commands of every terminal in the workspace, opening closed ones, after
+    /// asking — they may start servers or deploys, and the button sits right beside New Terminal.
+    func runAllStartupCommands() {
+        let ids = terminalsWithStartupCommands
+        guard !ids.isEmpty else { NSSound.beep(); return }
+        let runAll = { [weak self] in
+            guard let self else { return }
+            for id in ids { self.runStartupCommands(for: id, askIfBusy: false, activate: false) }
+        }
+        guard let window, !DebugDriver.isActive else { runAll(); return }
+        let closed = ids.filter { !registry.isOpen($0) }.count
+        let busy = ids.compactMap { registry.pane(for: $0) }.filter(\.hasRunningJob).count
+        let alert = NSAlert()
+        alert.messageText = ids.count == 1
+            ? "Run the startup commands of “\(registry.definition(ids[0])?.displayName ?? "this terminal")”?"
+            : "Run the startup commands of all \(ids.count) terminals?"
+        var notes: [String] = []
+        if closed > 0 { notes.append(closed == 1 ? "1 closed terminal will be opened." : "\(closed) closed terminals will be opened.") }
+        if busy > 0 { notes.append(busy == 1 ? "1 terminal is busy and will run them when its program finishes."
+                                           : "\(busy) terminals are busy and will run them when their programs finish.") }
+        alert.informativeText = notes.joined(separator: " ")
+        alert.addButton(withTitle: "Run All")
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
+        alert.beginSheetModal(for: window) { response in
+            if response == .alertFirstButtonReturn { runAll() }
+        }
+    }
+
+    /// Asks whether to run the startup commands held back while a workspace or session opened.
+    ///
+    /// Asked as a sheet on this window once it is on screen, never before: what is being
+    /// opened should be visible — terminals, their restored output — while you decide. The
+    /// commands themselves are not listed; the list shows which terminals have them, and each
+    /// can still be run later from its row.
+    ///
+    /// The shells of `controllers` are held until the answer, then started with the commands or
+    /// without, so Run Commands runs them from the shell exactly as an unasked open would.
+    /// - Parameter controllers: every tab that opened with its commands held back. A restored
+    ///   session asks once for all of them.
+    func offerStartupCommands(for what: String, in controllers: [TerminalWindowController]) {
+        let count = controllers.reduce(0) { $0 + $1.openTerminalsWithStartupCommands.count }
+        // Whatever happens, the held shells must start; a question that cannot be asked means
+        // nothing runs.
+        let startAll = { (run: Bool) in for c in controllers { c.startHeldTerminals(runningCommands: run) } }
+        guard count > 0 else { startAll(false); return }
+        // A turn of the run loop, so the window is actually showing before a sheet slides out
+        // of it.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { startAll(false); return }
+            let alert = NSAlert()
+            alert.messageText = "Run the startup commands for \(what)?"
+            alert.informativeText = (count == 1 ? "1 terminal has" : "\(count) terminals have")
+                + " startup commands. Skipping leaves the terminals as they are; you can run the commands"
+                + " later with the ▶ button beside a terminal in the list, or Run All below it."
+            alert.addButton(withTitle: "Run Commands")
+            alert.addButton(withTitle: "Skip").keyEquivalent = "\u{1b}"
+            NSApp.activate(ignoringOtherApps: true)
+            alert.beginSheetModal(for: window) { response in
+                startAll(response == .alertFirstButtonReturn)
+            }
+        }
+    }
+
+    /// Open terminals whose startup commands were held back when the workspace opened.
+    var openTerminalsWithStartupCommands: [String] {
+        terminalsWithStartupCommands.filter { registry.isOpen($0) }
+    }
+
+    /// Starts the shells held back while the startup-commands question was open, with their
+    /// commands or without.
+    func startHeldTerminals(runningCommands run: Bool) {
+        let held = heldPanes
+        heldPanes = []
+        for pane in held where registry.pane(for: pane.definitionID) === pane {
+            pane.startupCommands = run ? startupCommands(of: pane.definitionID) : []
+            pane.start()
+        }
+        activePane?.focusTerminal()
     }
 
     func sidebarDidSetEnvironment(_ environment: String?, for id: String) {
@@ -613,6 +773,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         sidebar?.reloadRow(id)
     }
 
+    func registryDidChangeSettings(_ registry: TerminalRegistry) {
+        for pane in registry.livePanes {
+            pane.applyFont()
+            pane.applyTextLayout()
+        }
+        sidebar?.reloadAll()
+    }
+
     func registryBecameEmpty(_ registry: TerminalRegistry) {
         guard !isClosing else { return }
         isClosing = true
@@ -621,10 +789,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     // MARK: Tabs
 
-    func addTab(layout: TabLayout, runStartupCommands: Bool = true) -> TerminalWindowController {
+    func addTab(layout: TabLayout, runStartupCommands: Bool = true, holdShells: Bool = false) -> TerminalWindowController {
         let controller = AppDelegate.shared.makeWindowController(layout: layout, frame: nil,
                                                                  workspaceName: layout.workspaceName,
-                                                                 runStartupCommands: runStartupCommands)
+                                                                 runStartupCommands: runStartupCommands,
+                                                                 holdShells: holdShells)
         if let mine = window, let theirs = controller.window {
             mine.addTabbedWindow(theirs, ordered: .above)
             theirs.makeKeyAndOrderFront(nil)
@@ -663,6 +832,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     // MARK: Menu actions
 
     @objc func newTerminalAction(_ sender: Any?) { newTerminal() }
+    @objc func runActiveStartupCommands(_ sender: Any?) {
+        guard let id = activePane?.definitionID else { return }
+        runStartupCommands(for: id, askIfBusy: true)
+    }
+    @objc func runAllStartupCommandsAction(_ sender: Any?) { runAllStartupCommands() }
     @objc func newTerminalTiled(_ sender: Any?) { newTerminal(tileAfter: true) }
     @objc func closeActivePane(_ sender: Any?) { if let p = activePane { closePane(p) } }
     @objc func toggleZoom(_ sender: Any?) { activePane?.toggleZoom() }
@@ -695,6 +869,76 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         if !container.sidebarVisible { setSidebarVisible(true) }
         sidebarDidRequestSettings(id)
     }
+    /// Opens this tab's Workspace Settings, on the focused terminal when there is one.
+    @objc func showWorkspaceSettings(_ sender: Any?) {
+        showWorkspaceSettings(selecting: activePane?.definitionID)
+    }
+
+    func showWorkspaceSettings(selecting id: String?) {
+        let panel = workspacePanel ?? WorkspaceSettingsWindowController(controller: self)
+        workspacePanel = panel
+        panel.show(selecting: id)
+    }
+
+    /// The panel, for tests that drive it directly.
+    var workspaceSettingsPanel: WorkspaceSettingsWindowController {
+        let panel = workspacePanel ?? WorkspaceSettingsWindowController(controller: self)
+        workspacePanel = panel
+        return panel
+    }
+
+    /// The document the Workspace Settings panel edits, built from the live tab.
+    var workspaceDocument: WorkspaceDocument {
+        WorkspaceDocument(settings: registry.settings, definitions: registry.definitions)
+    }
+
+    /// Terminals `document` would delete, by display name, so the panel can say so first.
+    func terminalsRemoved(by document: WorkspaceDocument) -> [String] {
+        let kept = Set(document.terminals.map(\.id))
+        return registry.definitions.filter { !kept.contains($0.id) }.map(\.displayName)
+    }
+
+    /// Makes the tab match `document`: updates each terminal's settings, adds the new ones and
+    /// opens them, deletes the missing ones, and takes the document's order.
+    ///
+    /// Variables of an already running terminal reach its shell the next time it starts; a
+    /// process's environment cannot be changed from outside.
+    func apply(_ document: WorkspaceDocument) {
+        let before = snapshot().secretRefs
+        let existing = Set(registry.order)
+        let definitions = document.definitions(merging: registry.definitions)
+        let kept = Set(definitions.map(\.id))
+
+        // Updating and adding come before deleting, so the registry is never momentarily empty
+        // — that closes the window.
+        var added: [String] = []
+        for def in definitions {
+            if existing.contains(def.id) {
+                registry.update(def)
+            } else {
+                var fresh = def
+                fresh.z = registry.maxZ + 1
+                added.append(registry.insert(fresh))
+            }
+        }
+        registry.settings = document.settings
+        for id in registry.order where !kept.contains(id) {
+            if let pane = registry.pane(for: id) { canvas.remove(pane) }
+            sidebar.forgetCache(for: id)
+            registry.remove(id)
+        }
+        registry.reorder(definitions.map(\.id))
+        for id in added { openTerminal(id, isReopen: false, focus: false) }
+        renumber()
+        updateEmptyState()
+        sidebar.reloadAll()
+        if activePane.map({ registry.pane(for: $0.definitionID) == nil }) ?? true {
+            setActivePane(registry.livePanes.first)
+        }
+        stateChanged()
+        SecretStore.discard(before)
+    }
+
     @objc func duplicateTerminal(_ sender: Any?) {
         guard let id = activePane?.definitionID else { return }
         sidebarDidRequestDuplicate(id)
@@ -927,6 +1171,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
+        case #selector(runActiveStartupCommands(_:)):
+            return activePane.map { !startupCommands(of: $0.definitionID).isEmpty } ?? false
+        case #selector(runAllStartupCommandsAction(_:)):
+            return !terminalsWithStartupCommands.isEmpty
         case #selector(focusPaneByNumber(_:)):
             return item.tag <= registry.count
         case #selector(focusLeft(_:)), #selector(focusRight(_:)), #selector(focusUp(_:)),
@@ -971,6 +1219,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
             return activePane != nil
         case #selector(duplicateTerminal(_:)), #selector(deleteTerminal(_:)), #selector(showTerminalSettings(_:)):
             return !registry.isEmpty
+        case #selector(showWorkspaceSettings(_:)):
+            return true
         case #selector(saveWorkspace(_:)):
             item.title = workspaceName.map { "Save Workspace “\($0)”" } ?? "Save Workspace…"
             return !registry.isEmpty
@@ -995,6 +1245,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     func windowWillClose(_ notification: Notification) {
         isClosing = true
+        workspacePanel?.discardAndClose()
         for pane in registry.livePanes { pane.terminate() }
         onClose?(self)
     }
