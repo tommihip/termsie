@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// Cached interface fonts for drawing code.
 ///

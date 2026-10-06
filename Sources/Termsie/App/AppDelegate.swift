@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 struct LaunchArguments {
     var workspace: String?

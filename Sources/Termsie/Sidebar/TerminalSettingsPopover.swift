@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// Edits one terminal's saved settings: name, working folder, startup commands.
 ///

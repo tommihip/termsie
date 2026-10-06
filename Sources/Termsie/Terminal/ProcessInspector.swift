@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import TermsieCore
 
 /// Reads process facts straight from the kernel so the UI can show what each pane is doing
 /// without requiring any shell integration.

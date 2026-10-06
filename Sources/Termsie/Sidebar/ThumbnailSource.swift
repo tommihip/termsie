@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import TermsieCore
 
 /// Caches one terminal's thumbnail and decides when it actually needs redrawing.
 ///

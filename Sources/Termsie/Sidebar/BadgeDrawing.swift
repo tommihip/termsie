@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// Small drawn elements shared by the pane header and the sidebar rows, so the two cannot
 /// drift apart visually.

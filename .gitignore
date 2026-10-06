@@ -69,3 +69,6 @@ fastlane/test_output
 
 # Release artefacts
 dist/
+
+# Headless test output.
+test-output/

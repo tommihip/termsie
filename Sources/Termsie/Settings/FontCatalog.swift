@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// The fixed-pitch font families offered anywhere Termsie lets you pick a font.
 ///

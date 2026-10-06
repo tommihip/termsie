@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// Developer aid, in two modes.
 ///

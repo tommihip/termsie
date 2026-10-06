@@ -1,0 +1,120 @@
+name: Windows release
+
+# Builds, signs and packages a Windows release on demand, each architecture on a runner of its own
+# kind (ARM64 packages need the ARM64 Swift runtime, which only an ARM64 toolchain has), then
+# publishes both once. Signing uses Azure Trusted Signing when these repository secrets are set,
+# and the run produces unsigned packages otherwise:
+#
+#   AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET   a service principal allowed to sign
+#   TRUSTED_SIGNING_ENDPOINT        e.g. https://weu.codesigning.azure.net
+#   TRUSTED_SIGNING_ACCOUNT         the Trusted Signing account name
+#   TRUSTED_SIGNING_PROFILE         the certificate profile name
+#   TRUSTED_SIGNING_PUBLISHER       the certificate subject, for the MSIX manifest ("CN=…")
+#
+# With "publish" checked, the packages are uploaded to the GitHub release for the version
+# (created if the macOS script has not made it yet) and the winget manifests are attached as an
+# artifact, ready for `wingetcreate submit`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload to the GitHub release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+            swift-arch: amd64
+          - arch: arm64
+            runner: windows-11-arm
+            swift-arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      HAS_SIGNING: ${{ secrets.TRUSTED_SIGNING_ACCOUNT != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: compnerd/gha-setup-swift@v0.5.0
+        with:
+          swift-version: swift-6.4.0-release
+          swift-build: 6.4.0-RELEASE
+          build_arch: ${{ matrix.swift-arch }}
+      - name: SwiftTerm build information without git
+        shell: pwsh
+        run: ./scripts/swiftterm-build-info.ps1 -GitHubEnv
+
+      - name: Trusted Signing client
+        id: signing
+        if: ${{ env.HAS_SIGNING == 'true' }}
+        shell: pwsh
+        env:
+          ENDPOINT: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+          ACCOUNT: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+          PROFILE: ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+        run: |
+          nuget install Microsoft.Trusted.Signing.Client -OutputDirectory $env:RUNNER_TEMP\tsc -NonInteractive
+          $hostArch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+          $dlib = Get-ChildItem $env:RUNNER_TEMP\tsc -Recurse -Filter Azure.CodeSigning.Dlib.dll |
+            Where-Object { $_.FullName -match $hostArch } | Select-Object -First 1
+          @{ Endpoint = $env:ENDPOINT; CodeSigningAccountName = $env:ACCOUNT; CertificateProfileName = $env:PROFILE } |
+            ConvertTo-Json | Set-Content -Encoding utf8 $env:RUNNER_TEMP\metadata.json
+          "dlib=$($dlib.FullName)" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          "metadata=$env:RUNNER_TEMP\metadata.json" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+
+      - name: Build, sign and package
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          PUBLISHER: ${{ secrets.TRUSTED_SIGNING_PUBLISHER }}
+        run: |
+          $params = @{ Arch = @("${{ matrix.arch }}") ; Repo = "${{ github.repository }}" }
+          if ("${{ steps.signing.outputs.metadata }}") {
+            $params.TrustedSigning = "${{ steps.signing.outputs.metadata }}"
+            $params.TrustedSigningDlib = "${{ steps.signing.outputs.dlib }}"
+            $params.Publisher = $env:PUBLISHER
+          } else {
+            $params.SkipSign = $true
+          }
+          ./scripts/release-windows.ps1 @params
+
+      - name: Check the packaged app runs
+        shell: pwsh
+        run: ./scripts/test-windows.ps1 -Exe dist/windows/${{ matrix.arch }}/Termsie/Termsie.exe -Out test-output
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: termsie-windows-${{ matrix.arch }}
+          path: |
+            dist/windows/*.zip
+            dist/windows/*.msix
+
+  publish:
+    needs: package
+    if: ${{ inputs.publish }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: termsie-windows-*
+          path: dist/windows
+          merge-multiple: true
+      - name: Upload to the release and write winget manifests
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/release-windows.ps1 -PublishOnly -Repo "${{ github.repository }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winget-manifests
+          path: dist/windows/winget

@@ -6,10 +6,10 @@
 
 **One window for everything you're running.**
 
-A native macOS terminal built for developers who always have five things going at once:
+A native terminal for macOS and Windows, built for developers who always have five things going at once:
 an API, a bundler, a worker, a database shell, and somewhere a `tail -f`.
 
-[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey.svg)](#requirements)
+[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20Windows%2010%2B-lightgrey.svg)](#requirements)
 [![Swift](https://img.shields.io/badge/Swift-5.9%2B-F05138.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-early-orange.svg)](#project-status)
@@ -52,8 +52,9 @@ padding and line-wrapping overrides, and a config file that reloads the moment y
 
 ## Requirements
 
-- macOS 14 or later (developed on macOS 26)
-- Xcode command line tools with Swift 5.9+, to build from source
+- macOS 14 or later (developed on macOS 26), or Windows 10 version 1903 or later on x64 or ARM64
+- To build from source: the Xcode command line tools with Swift 5.9+ on macOS; on Windows, Swift
+  6.4 and Visual Studio 2022 Build Tools (see [Termsie on Windows](docs/windows.md))
 
 ## Install
 
@@ -65,6 +66,11 @@ brew install --cask tommihip/tap/termsie
 
 Both give you a universal build that runs on Apple silicon and Intel, and open
 with an ordinary double click.
+
+On **Windows**, download the zip or the MSIX from the
+[releases page](https://github.com/tommihip/termsie/releases), or `winget install Termsie.Termsie`.
+[Termsie on Windows](docs/windows.md) covers the shells it supports (PowerShell, cmd, Git Bash,
+WSL), its keyboard shortcuts (⌘ becomes Ctrl+Shift), where it keeps its files, and building it.
 
 ### Updates
 
@@ -509,33 +515,47 @@ been observed returning nil — which then detonates deep inside CoreText, far f
 
 ## Development
 
+The package has three parts. **TermsieCore** is shared and builds everywhere: the model,
+workspaces and sessions, config, shell integration (zsh, bash, fish and PowerShell), command marks,
+text capture and kept output. **Termsie** is the AppKit app below. On Windows the same `Termsie`
+product is built from **TermsieWindows** (Win32 and Direct2D) with a small C++ layer,
+**CTermsieWin**; see [Termsie on Windows](docs/windows.md).
+
 ```
+Sources/TermsieCore/
+  Config/     TermsieConfig and ConfigStore (JSON, platform defaults), RGBA
+  Model/      TerminalDefinition, EnvironmentVariables (EnvVar, WorkspaceSettings), SecretStore
+  Session/    WorkspaceStore, WorkspaceDocument, LegacyMigration, LayoutTree
+  Shell/      ShellIntegration, ShimScripts (zsh), PowerShellShim
+  Terminal/   CommandMarks, TerminalTextCapture, OutputSnapshot
+  Layout/     PaneChrome, Arrange, CanvasGeometry
+  Support/    AppInfo, MainScheduler, HomePath, ShellKind, ReleaseFeed
 Sources/Termsie/
   App/        AppDelegate, MainMenu, Config (JSON + file watcher), DebugDriver, WindowCapture, UIFonts,
               Updater (GitHub release check, signature-verified self-update)
-  Model/      TerminalDefinition (the saved terminal), TerminalRegistry (definitions ↔ live panes),
-              EnvironmentVariables (EnvVar, WorkspaceSettings), SecretStore (Keychain)
+  Model/      TerminalRegistry (definitions ↔ live panes), KeychainSecretBackend
   Window/     TerminalWindowController — lifecycle, focus, menus, workspace and session plumbing
-  Layout/     PaneCanvasView (floating terminals), PaneChrome (hit zones), Arrange (tile/cascade),
-              LayoutTree (legacy v1 decode only)
+  Layout/     PaneCanvasView (floating terminals), PaneChrome (cursors, cell metrics)
   Terminal/   TerminalPane, TermsieTerminalView, PaneHeaderView, TrafficLightsView, FindBarView,
-              ProcessInspector, ShellIntegration + ShimScripts (history, startup commands, marks),
-              CommandMarks (OSC 133 stream scanner), TerminalTextCapture (buffer → clipboard),
-              OutputSnapshot (output kept between close and reopen)
+              ProcessInspector, TerminalScrollHost
   Sidebar/    TerminalSidebarView, TerminalRowView, SidebarFooterView, SidebarCopyToolsView,
               ThumbnailRenderer, ThumbnailSource, TerminalSettingsPopover, SidebarContainerView,
               BadgeDrawing
-  Session/    WorkspaceStore (v2 format), LegacyMigration (v1 split trees → terminals)
-  Workspace/  WorkspaceSettingsWindowController (form + JSON), WorkspaceDocument
+  Workspace/  WorkspaceSettingsWindowController (form + JSON)
   Settings/   SettingsWindowController (general, font, environments), SettingsForm, FontCatalog
 ```
 
 ### Tests
 
 ```bash
+swift test               # the shared core, on macOS, Linux and Windows
 ./scripts/test-shim.sh   # the shell shim, before the app is ever launched
 ./scripts/test-app.sh    # the app, driven headlessly
 ```
+
+On Windows, `./scripts/test-windows.ps1` drives the Windows app the same way. CI runs the core
+tests on Linux, macOS and Windows, builds the macOS app and checks its shim, and builds, drives and
+packages the Windows app on every push.
 
 `test-shim.sh` compares a native `zsh -li` against a shimmed one and requires the exported
 environment to be identical apart from the history variables, then proves history isolation over

@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// The area terminals float in. Replaces the old nested split tree.
 ///

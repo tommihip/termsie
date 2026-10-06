@@ -35,7 +35,7 @@ DIST="$ROOT/dist"
 APP="$DIST/$APP_NAME.app"
 
 PLIST="$ROOT/Resources/Info.plist"
-APPINFO="$ROOT/Sources/Termsie/Terminal/TerminalPane.swift"
+APPINFO="$ROOT/Sources/TermsieCore/Support/Platform.swift"
 
 PUBLISH=0
 SKIP_NOTARIZE=0

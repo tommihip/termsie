@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// One window (or tab): a sidebar of saved terminals beside a canvas of floating ones.
 final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation,

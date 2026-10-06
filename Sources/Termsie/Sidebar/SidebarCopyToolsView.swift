@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// The copy tools that sit between the terminal list and the New Terminal button: a switch for
 /// copying every selection as it is made, and three buttons that copy a whole command, its output,

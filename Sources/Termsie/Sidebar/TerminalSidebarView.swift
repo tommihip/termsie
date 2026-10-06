@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 protocol TerminalSidebarDelegate: AnyObject {
     func sidebarDidActivate(_ id: String)

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import TermsieCore
 
 /// One floating terminal: a header strip plus a SwiftTerm view running a local shell.
 ///
@@ -844,9 +845,4 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         let code = exitCode.map(String.init) ?? "?"
         terminalView.feed(text: "\r\n\u{1b}[90m[process exited with code \(code) — press any key to close]\u{1b}[0m\r\n")
     }
-}
-
-enum AppInfo {
-    static let version = "0.8.0"
-    static let name = "Termsie"
 }

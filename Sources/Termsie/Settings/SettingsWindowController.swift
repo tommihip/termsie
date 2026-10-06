@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// The application settings window: the global font, and the environments a terminal can belong to.
 ///
