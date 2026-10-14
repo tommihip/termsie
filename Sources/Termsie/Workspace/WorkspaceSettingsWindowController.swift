@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// One place to configure a whole workspace: the defaults its terminals share, and each
 /// terminal's folder, startup commands, environment variables and looks.

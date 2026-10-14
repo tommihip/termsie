@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: [main, windows-port]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux app
+    runs-on: ubuntu-latest
+    container: swift:6.4
+    steps:
+      - uses: actions/checkout@v4
+      - name: GTK 4, libsecret, a display and the shells
+        run: |
+          apt-get update -q
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q libgtk-4-dev libsecret-1-dev xvfb fonts-dejavu-core zsh expect dbus
+      - name: Test the shared core
+        run: swift test
+      - name: Build the app
+        run: ./scripts/build-linux.sh
+      - name: Shell shim matches a native zsh
+        run: ./scripts/test-shim.sh dist/linux/x86_64/termsie/bin/termsie
+      - name: Drive the app headlessly
+        if: always()
+        run: ./scripts/test-linux.sh dist/linux/x86_64/termsie/bin/termsie test-output
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-test-output
+          path: test-output
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: termsie-linux-x86_64
+          path: dist/linux/*.tar.gz
+          if-no-files-found: ignore
+
+  macos:
+    name: macOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift --version
+      - name: Test the shared core
+        run: swift test
+      - name: Build the app bundle
+        run: make app
+      - name: Shell shim matches a native zsh
+        run: ./scripts/test-shim.sh build/Termsie.app/Contents/MacOS/Termsie
+
+  windows:
+    name: Windows app
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: compnerd/gha-setup-swift@v0.5.0
+        with:
+          swift-version: swift-6.4.0-release
+          swift-build: 6.4.0-RELEASE
+      - run: swift --version
+      - name: SwiftTerm build information without git
+        shell: pwsh
+        run: ./scripts/swiftterm-build-info.ps1 -GitHubEnv
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: windows-build-${{ hashFiles('Package.resolved', 'Package.swift') }}-${{ github.sha }}
+          restore-keys: |
+            windows-build-${{ hashFiles('Package.resolved', 'Package.swift') }}-
+      - name: Test the shared core
+        run: swift test
+      - name: Build the app
+        shell: pwsh
+        run: ./scripts/build-windows.ps1 -Configuration release -Arch x64 -Conpty
+      - name: PowerShell shim leaves the environment alone
+        shell: pwsh
+        run: ./scripts/test-shim.ps1 -Exe dist/windows/x64/Termsie/Termsie.exe
+      - name: Drive the app headlessly
+        if: always()
+        shell: pwsh
+        run: ./scripts/test-windows.ps1 -Exe dist/windows/x64/Termsie/Termsie.exe -Out test-output
+      - name: Package (unsigned)
+        if: always()
+        shell: pwsh
+        run: ./scripts/release-windows.ps1 -SkipBuild -SkipSign -Arch x64
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-test-output
+          path: test-output
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: termsie-windows-x64-unsigned
+          path: |
+            dist/windows/*.zip
+            dist/windows/*.msix
+            dist/windows/SHA256SUMS-windows.txt
+          if-no-files-found: ignore
+
+  windows-arm64:
+    name: Windows app (ARM64)
+    # Built natively, so the ARM64 Swift runtime is the toolchain's own. Reported, not required,
+    # while ARM64 runners are newer than the rest.
+    runs-on: windows-11-arm
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: compnerd/gha-setup-swift@v0.5.0
+        with:
+          swift-version: swift-6.4.0-release
+          swift-build: 6.4.0-RELEASE
+          build_arch: arm64
+      - name: SwiftTerm build information without git
+        shell: pwsh
+        run: ./scripts/swiftterm-build-info.ps1 -GitHubEnv
+      - name: Build
+        shell: pwsh
+        run: ./scripts/build-windows.ps1 -Configuration release -Arch arm64 -Conpty
+      - name: Drive the app headlessly
+        shell: pwsh
+        run: ./scripts/test-windows.ps1 -Exe dist/windows/arm64/Termsie/Termsie.exe -Out test-output-arm64
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: termsie-windows-arm64
+          path: |
+            dist/windows/arm64/Termsie
+            test-output-arm64
+          if-no-files-found: ignore

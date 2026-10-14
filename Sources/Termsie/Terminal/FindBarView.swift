@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import TermsieCore
 
 /// Small overlay for searching the scrollback of one pane.
 final class FindBarView: NSView, NSTextFieldDelegate {

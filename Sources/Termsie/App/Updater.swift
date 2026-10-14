@@ -1,6 +1,7 @@
 import AppKit
 import CryptoKit
 import Security
+import TermsieCore
 
 /// Looks for a newer release on GitHub and, if the user agrees, replaces this app with it.
 ///

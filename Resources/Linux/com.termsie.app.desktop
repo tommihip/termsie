@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Termsie
+GenericName=Terminal
+Comment=One window for everything you're running
+Exec=termsie
+Icon=com.termsie.app
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=terminal;shell;console;workspace;
+StartupNotify=true

@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// The window's content view: the terminal list, a draggable divider, and the canvas.
 ///

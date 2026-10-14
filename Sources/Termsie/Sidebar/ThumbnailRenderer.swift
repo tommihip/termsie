@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import TermsieCore
 
 /// Renders a terminal's visible screen as a miniature.
 ///

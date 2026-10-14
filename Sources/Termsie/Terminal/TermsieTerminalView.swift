@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import TermsieCore
 
 /// SwiftTerm's local-process view plus the hooks Termsie needs: activity/bell signals,
 /// focus tracking, input broadcast, "press any key to close" after the shell exits, and the

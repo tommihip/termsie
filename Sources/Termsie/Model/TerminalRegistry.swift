@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 protocol TerminalRegistryDelegate: AnyObject {
     /// The list itself changed: an insert, a delete, or a reorder.

@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// One row of the terminal list: number, open/closed dot, live thumbnail, name, folder, badge,
 /// and a button that runs the terminal's startup commands.

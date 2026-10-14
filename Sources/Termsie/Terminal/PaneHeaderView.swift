@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// The title bar of a floating terminal: window buttons, its number, name, working directory and
 /// state. Also the drag handle that moves the terminal around the canvas.

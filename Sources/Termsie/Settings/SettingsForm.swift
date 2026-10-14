@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// A top-down form for settings tabs.
 ///

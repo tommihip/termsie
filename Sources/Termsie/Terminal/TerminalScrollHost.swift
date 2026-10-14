@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import TermsieCore
 
 /// Holds one terminal view inside a pane and supplies the two things SwiftTerm has no notion of:
 /// the blank margin around the text, and sideways scrolling when lines are not wrapped.

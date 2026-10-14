@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX package manifest for Termsie. scripts/release-windows.ps1 fills in the placeholders:
+  {VERSION} (four parts), {ARCH} (x64 or arm64) and {PUBLISHER} (the signing certificate's
+  subject, e.g. "CN=Example Ltd, O=Example Ltd, L=London, C=GB").
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 desktop desktop6 rescap">
+
+  <Identity Name="Termsie.Termsie" Publisher="{PUBLISHER}" Version="{VERSION}" ProcessorArchitecture="{ARCH}" />
+
+  <Properties>
+    <DisplayName>Termsie</DisplayName>
+    <PublisherDisplayName>Termsie</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>One window for everything you're running: floating, colour-coded terminals with a live list of what each is doing.</Description>
+    <!-- Termsie keeps its settings in %APPDATA%\termsie, which people edit by hand and share
+         between versions. Without this, a packaged install would write to a private copy. -->
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+  </Properties>
+
+  <Dependencies>
+    <!-- Windows 10 1903: per-monitor DPI v2, the pseudo console and write-virtualization control. -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.18362.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="Termsie" Executable="Termsie\Termsie.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Termsie"
+        Description="Floating terminals in one window"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="Termsie\Termsie.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="termsie.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
+  </Capabilities>
+</Package>

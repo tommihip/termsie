@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 enum MainMenu {
     private static let workspacesDelegate = WorkspacesMenuDelegate()

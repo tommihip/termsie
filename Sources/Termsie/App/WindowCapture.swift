@@ -1,5 +1,6 @@
 import AppKit
 import ScreenCaptureKit
+import TermsieCore
 
 /// Captures a single window to an image, including Metal-rendered content.
 ///

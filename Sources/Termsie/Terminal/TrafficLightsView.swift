@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// The red / yellow / green buttons, drawn the way macOS draws them: plain circles that reveal
 /// their glyphs when the pointer is anywhere over the group.

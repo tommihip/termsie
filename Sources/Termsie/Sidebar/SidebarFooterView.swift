@@ -1,4 +1,5 @@
 import AppKit
+import TermsieCore
 
 /// The strip along the bottom of the terminal list: New Terminal, and Run All beside it.
 final class SidebarFooterView: NSView {
