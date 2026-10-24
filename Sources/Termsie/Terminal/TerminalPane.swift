@@ -940,6 +940,6 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
 }
 
 enum AppInfo {
-    static let version = "0.9.0"
+    static let version = "0.9.1"
     static let name = "Termsie"
 }
