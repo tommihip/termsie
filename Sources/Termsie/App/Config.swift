@@ -122,6 +122,8 @@ struct TermsieConfig: Codable, Equatable {
         var commandMarks = true
         /// Drop the trailing blank lines and right-hand padding a terminal grid always has.
         var trimCopiedText = true
+        /// Say on the terminal what was copied, or that nothing was.
+        var showConfirmation = true
 
         init() {}
         init(from decoder: Decoder) throws {
@@ -130,6 +132,7 @@ struct TermsieConfig: Codable, Equatable {
             showTools = try c.decodeIfPresent(Bool.self, forKey: .showTools) ?? showTools
             commandMarks = try c.decodeIfPresent(Bool.self, forKey: .commandMarks) ?? commandMarks
             trimCopiedText = try c.decodeIfPresent(Bool.self, forKey: .trimCopiedText) ?? trimCopiedText
+            showConfirmation = try c.decodeIfPresent(Bool.self, forKey: .showConfirmation) ?? showConfirmation
         }
     }
 

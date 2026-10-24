@@ -420,6 +420,19 @@ check "and the general setting shows the same value" \
       "$(print -r -- "$out" | grep 'readSetting: \[Copy a selection as soon\] shown=true')"
 check "a copy shortcut still copies"        "$(clip "$out" 1 | grep 'TOOLSHIDDEN')"
 
+print "\n== every copy says what it copied, or that nothing was"
+fix=$ROOT/copytoast; mkdir -p $fix/termsie
+print '{}' > $fix/termsie/config.json
+out=$(run $fix "wait,copy:selection,type:echo toast-me\n,wait,wait,copy:lastCommand,dumpToast,select:0x0x0x5,copy,toggleAutoCopyOnSelect,autoCopyNow,copy:wholeTerminal" --cwd $HOME)
+check "an empty copy says nothing was copied"        "$(print -r -- "$out" | grep 'toast: \[Nothing copied\] \[Nothing is selected.\]')"
+check "a copy tool names what it copied and its start" "$(print -r -- "$out" | grep -F 'toast: [Copied last command · 13 characters] [echo toast-me]')"
+check "and the note is on screen"                    "$(print -r -- "$out" | grep 'toastVisible: true')"
+check "⌘C confirms too"                              "$(print -r -- "$out" | grep -c 'toast: \[Copied selection · ' | grep -E '^[2-9]')"
+check "a whole-terminal copy counts lines"           "$(print -r -- "$out" | grep 'toast: \[Copied whole terminal · [0-9]* lines\]')"
+print '{"copy":{"showConfirmation":false}}' > $fix/termsie/config.json
+out=$(run $fix "wait,type:echo quiet\n,wait,copy:wholeTerminal,dumpToast" --cwd $HOME)
+check "turned off, nothing is shown"                 "$(print -r -- "$out" | grep 'toastVisible: false')"
+
 print "\n== environment variables reach the shell whether or not commands run"
 # The test backend keeps secrets in a file instead of the Keychain; it only works under --snapshot.
 fix=$ROOT/envvars; mkdir -p $fix/termsie/workspaces

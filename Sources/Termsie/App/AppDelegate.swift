@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var controllers: [TerminalWindowController] = []
     private let launch = LaunchArguments.parse()
     private var mouseMonitor: Any?
+    private var keyMonitor: Any?
 
     // MARK: NSApplicationDelegate
 
@@ -43,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         MainMenu.install()
+        SSHLaunch.sweepAbandonedDirectories()
         ConfigStore.shared.startWatching()
 
         if let name = launch.workspace {
@@ -56,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         startCursorTracking()
+        startKeyPreparation()
         pruneStaleTerminalState()
         DebugDriver.startIfRequested()
         Updater.shared.startAutomaticChecks()
@@ -72,6 +75,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { event in
             if let controller = event.window?.windowController as? TerminalWindowController {
                 controller.updateCursor(atWindowPoint: event.locationInWindow)
+            }
+            return event
+        }
+    }
+
+    /// Lets the focused terminal decide how to read Option before SwiftTerm handles the key.
+    private func startKeyPreparation() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+            if let view = event.window?.firstResponder as? TermsieTerminalView {
+                view.prepareForKeyDown(event)
             }
             return event
         }
@@ -133,6 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        for controller in controllers { controller.panes.forEach { $0.removeSSHPrivateDirectory() } }
         Updater.shared.installPendingUpdate()
     }
 

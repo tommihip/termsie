@@ -1,45 +1,27 @@
-Termsie 0.8.0 — universal, signed with a Developer ID and notarised by Apple.
+Termsie 0.9.0 — universal, signed with a Developer ID and notarised by Apple.
 
 ## What's new
 
-- **Environment variables per terminal and per workspace.** Each terminal can have its
-  own environment variables, and a workspace can set variables for all of its terminals.
-  If both set the same name, the terminal's value wins. They are set when the shell
-  starts, whether or not the startup commands run, so they never appear on screen or in
-  your shell history.
-- **Secrets stay out of your files.** Mark a variable as secret and its value is kept in
-  your macOS Keychain, not in the workspace file or the saved session. Once saved, the
-  value is never shown again. A secret you remove is deleted from the Keychain once
-  nothing refers to it. If a workspace is opened on a Mac that doesn't have the secret,
-  the terminal says which one is missing.
-- **Workspace Settings panel** (Workspaces ▸ Workspace Settings…, ⌥⌘,). One place to set
-  up every terminal in a workspace: name, folder, environment, startup commands, font,
-  wrapping, padding and environment variables. Terminals can be added and removed here
-  too. It has two views of the same settings:
-  - **Form** — fields for the workspace defaults and for each terminal.
-  - **JSON** — the whole workspace as one document, for editing by hand or by an AI
-    tool. Mistakes such as a misspelt key are reported instead of silently ignored.
-
-  Changes take effect when you press Apply, and Revert throws them away.
-- **Workspace-wide font and layout.** A workspace can set its own font, size, line
-  wrapping and padding. Terminals use it unless they set their own, and anything left
-  unset follows the global settings.
-- **Quicker way in from a terminal.** The terminal settings popover has a new button that
-  opens the Workspace Settings panel on that terminal.
-- **Output that survives closing.** A terminal now keeps the end of its output when it
-  closes and shows it again when it reopens — after closing the terminal, its workspace, or
-  Termsie itself. Colours are kept. How much is kept is a setting (1000 lines by default,
-  0 for none) in Settings ▸ General, and each workspace can set its own in Workspace
-  Settings. Reopening a saved workspace now also brings back each terminal's own command
-  history, which it previously started afresh.
-- **Run startup commands on demand.** Each terminal in the list has a ▶ button that runs
-  its startup commands, opening it first if it is closed. **Run All**, beside New Terminal,
-  runs them for every terminal in the workspace. Both are in the Shell menu too.
-- **A resizable terminal list.** Drag its edge narrower and the thumbnails shrink, then give
-  way to just the names, and finally to just the numbers. Wider than the default, the
-  thumbnails stay the same size and the names get the room.
-- **The "run startup commands?" question comes after the workspace opens,** as a sheet on
-  its window, so you can see what you are opening. It no longer lists the commands.
+- **SSH terminals.** A terminal can now be a connection to a server instead of a local
+  shell: **Shell ▸ New SSH Terminal…** (⇧⌘N), or **Connect over SSH…** in any terminal's
+  settings. It runs your own `ssh`, so `~/.ssh/config`, the SSH agent, `known_hosts` and
+  ProxyJump all work as they always have.
+- **Saved logins, kept in the Keychain.** An SSH terminal can remember its password, its
+  key's passphrase, or the private key itself. They are typed for you when `ssh` asks and
+  are never shown, written to a workspace file or put in your history. A stored password
+  that turns out to be wrong is tried once, and then you are asked in the terminal.
+- **Startup commands and folders on the server.** An SSH terminal's startup commands run on
+  the server before its shell starts, and its working folder is a folder there. Close it
+  and click it in the list to reconnect.
+- **You can see that a copy worked.** Every copy — ⌘C, the copy tools, their shortcuts and
+  auto-copy on select — now shows a short note on the terminal saying what was copied, how
+  many lines, and how it begins. If there was nothing to copy, it says so and why, rather
+  than leaving you to guess. ⌘C with nothing selected no longer empties the clipboard. The
+  note can be turned off in Settings ▸ General.
+- **Option keys type what your keyboard says.** On Finnish, Swedish, German and similar
+  layouts, ⌥2 now types `@` (and `[ ] { } | \ ~` work too) instead of being taken as Meta.
+  Option still works as Meta for word movement wherever the layout has no character there,
+  including on a US keyboard.
 
 **Install:** download the `.dmg` below and drag Termsie to your Applications folder, or
 

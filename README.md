@@ -42,8 +42,9 @@ again.
 | **A terminal list that shows what is happening** | Every terminal, open or closed, with a live thumbnail of its screen, its working directory, and what is running in it. Drawn from the character buffer, so it costs almost nothing when idle. Drag its edge narrower and the thumbnails shrink, then give way to just the names, then to just the numbers. |
 | **Environments** | Tag a terminal production, staging, development, or anything you define. Its background, header, badge and list row all take that colour. |
 | **Saved terminals** | Each terminal keeps a working folder and commands to run on open, like activating a virtualenv — or on demand, with the ▶ beside it in the list or **Run All** for the whole workspace. Close it and it stays in the list; click to bring it back exactly as it was, with the end of its output still on screen. |
+| **SSH terminals** | A terminal can be a connection to a server instead of a local shell. It runs your own `ssh`, so `~/.ssh/config`, the agent and ProxyJump all work, and keeps its password, key passphrase or even the private key itself in your Keychain. Startup commands and the working folder then apply on the server. |
 | **Its own command history** | Press Up in a terminal and you get what *you* typed *there*. No changes to your dotfiles required. |
-| **Copy tools** | Copy one command, everything it printed, or the whole terminal since the last `clear`, from the list or a keystroke. Selections can go to the clipboard the moment you make them, and they stay put while output keeps arriving. |
+| **Copy tools** | Copy one command, everything it printed, or the whole terminal since the last `clear`, from the list or a keystroke. Every copy, ⌘C included, briefly says on the terminal what went on the clipboard and how it begins, or that there was nothing to copy. Selections can go to the clipboard the moment you make them, and they stay put while output keeps arriving. |
 | **Workspaces** | Save a whole window of terminals to a file. New, Save, Save As, and a prompt before you throw away unsaved changes. |
 | **Genuinely native** | Swift and AppKit, GPU text rendering through Metal, translucency and blur like Terminal.app. No Electron, no web view. |
 
@@ -114,6 +115,7 @@ You get one terminal and an empty list. From there:
 | New window / new tab | ⌘N / ⌘T |
 | New terminal | ⌘D |
 | New terminal, then tile everything | ⌃⌘D |
+| New SSH terminal | ⇧⌘N |
 | Duplicate terminal | ⇧⌘D |
 | Terminal settings | ⌘I |
 | Workspace settings | ⌥⌘, |
@@ -242,6 +244,11 @@ Every key is optional.
 ```
 
 - `shell`: `null` uses `$SHELL` (falls back to `/bin/zsh`).
+- `optionAsMeta`: Option works as Meta (⌥B and ⌥F move by word, and so on). A key whose Option
+  character on your keyboard layout is printable ASCII still types it, so `@`, `[`, `{`, `|`, `\`
+  and `~` on Finnish, Swedish, German and similar layouts arrive as themselves. On a US layout
+  no Option character is ASCII, so every Option key stays Meta. `false` gives every Option key
+  back to the layout. ⌥⌘O flips it for one terminal.
 - `renderer`: `"metal"` or `"coregraphics"`.
 - `cursorStyle`: `block`, `bar`, `underline`, or the blinking variants `blinkBlock`, `blinkBar`,
   `blinkUnderline`.
@@ -274,6 +281,10 @@ Every key is optional.
   items, which work either way.
 - `copy.commandMarks`: ask the shell to say where each prompt, command and output begins. See
   [Copying a command, not a rectangle](#copying-a-command-not-a-rectangle).
+- `copy.showConfirmation` (also in Settings ▸ General): after each copy, show a note over the
+  terminal with what was copied (selection, command, output or everything), how many lines, and
+  its first line — or "Nothing copied" and why. VoiceOver announces it either way. ⌘C with
+  nothing selected now leaves the clipboard as it was, instead of emptying it.
 - `copy.trimCopiedText`: drop the right-hand padding a terminal grid puts on every row, and the
   blank screen below the last line.
 - `updates.checkAutomatically` (also in Settings ▸ General): look for a new release once a day and
@@ -378,6 +389,41 @@ deleted from the Keychain once no open tab or saved workspace refers to it. A wo
 on another Mac has the reference but not the value; the terminal says which secrets are missing.
 Like any environment variable, a secret is visible to processes running as you (`ps -E`).
 
+### SSH terminals
+
+**Shell ▸ New SSH Terminal…** (⇧⌘N) asks where to connect and opens the session. **Connect over
+SSH…** in an existing terminal's settings turns that terminal into one, and **Use Local Shell** in
+the same sheet turns it back. The connection holds:
+
+- **Host, user and port.** Any of them can come from `~/.ssh/config`: a `Host` alias on its own is
+  enough.
+- **Private key**: whatever `~/.ssh/config` and the SSH agent offer, a key file on this Mac, or a
+  private key pasted or imported into the Keychain.
+- **Password** and **key passphrase**, both kept in the Keychain and answered for you when `ssh`
+  asks. Leave them empty and `ssh` asks in the terminal, as usual. A stored one that turns out to be
+  wrong is tried once; after that you are asked.
+- **Extra options** as `Key=Value` (`ProxyJump=bastion`, `ServerAliveInterval=30`). Options that run
+  a command on your Mac (`ProxyCommand`, `LocalCommand`, `KnownHostsCommand` and the like) are
+  refused here, because a workspace file can come from someone else; put those in
+  `~/.ssh/config`, which is yours.
+
+The terminal's **startup commands** run on the server, in order, before its login shell, and its
+**working folder** is a folder on the server. Like the local ones, a command that fails or that you
+interrupt stops the rest, and the shell still starts. Its **environment variables** are set on the
+local `ssh` process (for `SSH_AUTH_SOCK`, say); export what the server needs in a startup command.
+
+In a workspace file a terminal is an SSH terminal when it has an `ssh` object:
+
+```json
+{ "name": "db", "startupCommands": ["sudo -iu postgres psql"],
+  "ssh": { "host": "db1", "user": "deploy", "port": 2222, "identity": "keyFile",
+           "identityFile": "~/.ssh/deploy_ed25519", "options": ["ProxyJump=bastion"] } }
+```
+
+Stored credentials appear in the file only as `passwordRef`, `passphraseRef` and `privateKeyRef`,
+opaque Keychain references, so a workspace can be shared without them. See
+[SSH credentials without a file](#ssh-credentials-without-a-file).
+
 Older files that used the original nested split-tree format still open; their panes become floating
 terminals in the same positions. `examples/legacy-v1-workspace.json` is one.
 
@@ -391,6 +437,23 @@ open -a Termsie --args --cwd ~/src/example
 ## How it works
 
 Some of this was more interesting than expected, and the reasoning is worth writing down.
+
+### SSH credentials without a file
+
+An SSH terminal runs `/usr/bin/ssh` itself, in place of a shell, rather than talking SSH from inside
+the app. Everything you already have set up for `ssh` keeps working, and there is no second
+implementation of host-key checking to trust.
+
+Stored credentials go through `SSH_ASKPASS`, pointed at Termsie's own executable. `ssh` runs it with
+the prompt, it reads the matching item from the Keychain and writes it to `ssh` over a pipe, so the
+value never touches the screen, a file, an argument list or your history. It answers each kind of
+prompt once per connection; a second request means the stored value was wrong, and it asks on the
+terminal instead, the same way `ssh` would have. Anything else, such as confirming a new host key,
+is also asked on the terminal. Terminals with nothing stored don't set `SSH_ASKPASS` at all.
+
+`ssh` will only read a private key from a file, so a key stored in the Keychain is written into a
+folder only you can open, inside your temporary directory, for as long as the session runs.
+Termsie deletes it when the session ends or Termsie quits, and at the next launch if it crashed.
 
 ### Per-terminal history without touching your dotfiles
 
@@ -535,11 +598,18 @@ Sources/Termsie/
 ```bash
 ./scripts/test-shim.sh   # the shell shim, before the app is ever launched
 ./scripts/test-app.sh    # the app, driven headlessly
+./scripts/test-ssh.sh    # SSH terminals against a throwaway local sshd, and the Option key
 ```
 
 `test-shim.sh` compares a native `zsh -li` against a shimmed one and requires the exported
 environment to be identical apart from the history variables, then proves history isolation over
 real pseudo-terminals with `expect`.
+
+`test-ssh.sh` starts an unprivileged `sshd` on a random local port with its own host key and
+authorized keys, so it needs neither Remote Login nor anything in `~/.ssh`. It checks key files with
+a stored passphrase, a stored private key and its clean-up, a wrong passphrase falling back to the
+terminal, server-side folders and startup commands, the refused options, and which Option keys
+type their layout's character.
 
 `test-app.sh` drives the real app and checks thumbnail correctness and cost, session migration,
 terminal lifecycle, startup commands, dragging and snapping, translucency, collapse, environments,

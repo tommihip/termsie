@@ -24,6 +24,9 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
     private let historyCheck = NSButton(checkboxWithTitle: "Own command history", target: nil, action: nil)
     private let applyButton = NSButton(title: "Run Commands Now", target: nil, action: nil)
     private let workspaceButton = NSButton(title: "Environment Variables & Workspace…", target: nil, action: nil)
+    private let sshButton = NSButton(title: "SSH Connection…", target: nil, action: nil)
+    private let folderLabel = NSTextField(labelWithString: "Working folder")
+    private let chooseFolderButton = NSButton(title: "Choose…", target: nil, action: nil)
 
     let popover = NSPopover()
 
@@ -32,6 +35,10 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
     var onEnvironmentChange: ((String, String?) -> Void)?
     /// Opens the Workspace Settings panel on this terminal, where its variables are edited.
     var onShowWorkspaceSettings: ((String) -> Void)?
+    /// Opens the SSH connection sheet for this terminal.
+    var onShowSSHConnection: ((String) -> Void)?
+
+    private var isSSH: Bool { registry?.definition(definitionID)?.ssh != nil }
 
     init(definitionID: String, registry: TerminalRegistry, onApply: @escaping (String, [String]) -> Void) {
         self.definitionID = definitionID
@@ -43,14 +50,14 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 550))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 580))
         let pad: CGFloat = 14
         let width = root.bounds.width - 2 * pad
         var y = root.bounds.height - pad
 
-        func label(_ text: String) {
+        func label(_ text: String, field: NSTextField? = nil) {
             y -= 16
-            let l = NSTextField(labelWithString: text)
+            let l = field ?? NSTextField(labelWithString: text)
             l.font = UIFonts.system(size: 11, weight: .semibold)
             l.textColor = .secondaryLabelColor
             l.frame = NSRect(x: pad, y: y, width: width, height: 16)
@@ -156,13 +163,15 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
         root.addSubview(paddingUnit)
         y -= 10
 
-        label("Working folder")
+        label("Working folder", field: folderLabel)
         y -= 22
         cwdField.frame = NSRect(x: pad, y: y, width: width - 78, height: 22)
         cwdField.placeholderString = "~"
         cwdField.delegate = self
         root.addSubview(cwdField)
-        let choose = NSButton(title: "Choose…", target: self, action: #selector(chooseFolder))
+        let choose = chooseFolderButton
+        choose.target = self
+        choose.action = #selector(chooseFolder)
         choose.bezelStyle = .rounded
         choose.frame = NSRect(x: pad + width - 74, y: y - 1, width: 74, height: 24)
         root.addSubview(choose)
@@ -207,6 +216,12 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
         workspaceButton.action = #selector(showWorkspaceSettings)
         workspaceButton.frame = NSRect(x: pad, y: y, width: width, height: 24)
         root.addSubview(workspaceButton)
+        y -= 30
+        sshButton.bezelStyle = .rounded
+        sshButton.target = self
+        sshButton.action = #selector(showSSHConnection)
+        sshButton.frame = NSRect(x: pad, y: y, width: width, height: 24)
+        root.addSubview(sshButton)
 
         view = root
         load()
@@ -233,6 +248,11 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
         paddingStepper.doubleValue = def.padding ?? ConfigStore.shared.config.terminalPadding
         historyCheck.state = def.isolatedHistory ? .on : .off
         applyButton.isEnabled = registry?.isOpen(definitionID) ?? false
+        // An SSH terminal's folder and commands are on the server, and it keeps no local history.
+        folderLabel.stringValue = isSSH ? "Folder on the server" : "Working folder"
+        chooseFolderButton.isEnabled = !isSSH
+        historyCheck.isEnabled = !isSSH
+        sshButton.title = isSSH ? "SSH Connection…" : "Connect over SSH…"
         validateFolder()
     }
 
@@ -240,7 +260,7 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
     /// and refusing to save would make the app unusable with external disks.
     private func validateFolder() {
         let raw = cwdField.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !raw.isEmpty else {
+        guard !raw.isEmpty, !isSSH else {
             cwdWarning.stringValue = ""
             cwdField.layer?.borderWidth = 0
             return
@@ -349,6 +369,11 @@ final class TerminalSettingsPopover: NSViewController, NSTextFieldDelegate {
     @objc private func showWorkspaceSettings() {
         commit()
         onShowWorkspaceSettings?(definitionID)
+    }
+
+    @objc private func showSSHConnection() {
+        commit()
+        onShowSSHConnection?(definitionID)
     }
 
     @objc private func applyNow() {

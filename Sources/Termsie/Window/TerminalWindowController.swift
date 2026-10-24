@@ -163,10 +163,12 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
 
     /// Adds a brand new terminal, placed in the next free cascade slot.
     @discardableResult
-    func newTerminal(cwd: String? = nil, tileAfter: Bool = false) -> TerminalPane? {
+    func newTerminal(cwd: String? = nil, tileAfter: Bool = false, ssh: SSHConnection? = nil) -> TerminalPane? {
         let frame = Arrange.nextSlot(in: canvas.bounds, existing: canvas.occupiedFrames)
-        var def = TerminalDefinition(cwd: cwd ?? activePane?.currentDirectory.map(ProcessInspector.abbreviateHome),
-                                     frame: canvas.fraction(for: frame))
+        // A local folder means nothing on a server, so an SSH terminal starts in its home there.
+        let folder = ssh != nil ? nil : cwd ?? activePane?.currentDirectory.map(ProcessInspector.abbreviateHome)
+        var def = TerminalDefinition(cwd: folder, frame: canvas.fraction(for: frame))
+        def.ssh = ssh
         def.z = registry.maxZ + 1
         def.environment = activePane?.environmentID
         let id = registry.insert(def)
@@ -533,6 +535,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         popover.onEnvironmentChange = { [weak self] defID, environment in
             self?.setEnvironment(environment, for: defID)
         }
+        popover.onShowSSHConnection = { [weak self] defID in
+            self?.settingsPopover?.popover.close()
+            self?.editSSHConnection(for: defID)
+        }
         popover.onShowWorkspaceSettings = { [weak self] defID in
             self?.settingsPopover?.popover.close()
             self?.showWorkspaceSettings(selecting: defID)
@@ -565,7 +571,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         let confirmNeeded = ConfigStore.shared.config.confirmClosingRunningProcess && (pane?.hasRunningJob ?? false)
         let performDelete = { [weak self] in
             guard let self else { return }
-            let refs = def.env.compactMap(\.secretRef)
+            let refs = def.secretRefs
             if let pane { self.canvas.remove(pane) }
             self.sidebar.forgetCache(for: id)
             self.registry.remove(id)
@@ -832,6 +838,39 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
     // MARK: Menu actions
 
     @objc func newTerminalAction(_ sender: Any?) { newTerminal() }
+    @objc func newSSHTerminal(_ sender: Any?) {
+        guard let window else { return }
+        SSHConnectionSheet(connection: nil, creatingTerminal: true) { [weak self] connection in
+            guard let self, let connection else { return }
+            self.newTerminal(ssh: connection)
+        }.present(on: window)
+    }
+    @objc func editSSHConnection(_ sender: Any?) {
+        guard let id = activePane?.definitionID else { return }
+        editSSHConnection(for: id)
+    }
+
+    /// Edits a terminal's connection, or makes a local terminal an SSH one (or back). An idle
+    /// terminal is restarted on the new settings straight away; one running something is left
+    /// alone, and picks them up the next time it opens.
+    func editSSHConnection(for id: String) {
+        guard let window, let def = registry.definition(id) else { return }
+        SSHConnectionSheet(connection: def.ssh, creatingTerminal: false) { [weak self] connection in
+            guard let self else { return }
+            self.registry.mutate(id) { $0.ssh = connection }
+            self.sidebar.dropCache(for: id)
+            self.sidebar.reloadRow(id)
+            self.stateChanged()
+            guard let pane = self.registry.pane(for: id) else { return }
+            if pane.hasExited || (!pane.isSSH && !pane.hasRunningJob) {
+                let focused = self.activePane === pane
+                self.closePane(pane, force: true)
+                self.openTerminal(id, isReopen: true, focus: focused)
+            } else {
+                pane.terminalView.feed(text: "\r\n\u{1b}[90m[connection settings changed — close and reopen this terminal to use them]\u{1b}[0m\r\n")
+            }
+        }.present(on: window)
+    }
     @objc func runActiveStartupCommands(_ sender: Any?) {
         guard let id = activePane?.definitionID else { return }
         runStartupCommands(for: id, askIfBusy: true)

@@ -125,8 +125,11 @@ enum SecretStore {
 
     // MARK: Test backend
 
+    /// The scripted-test secrets file in use, for handing on to a helper process.
+    static var testFilePath: String? { testFileURL?.path }
+
     private static var testFileURL: URL? {
-        guard DebugDriver.isActive,
+        guard DebugDriver.isActive || SSHAskpass.isTestRun,
               let path = ProcessInfo.processInfo.environment["TERMSIE_SECRETS_FILE"],
               !path.isEmpty else { return nil }
         return URL(fileURLWithPath: path)

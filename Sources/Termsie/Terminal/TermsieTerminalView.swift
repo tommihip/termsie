@@ -19,6 +19,9 @@ final class TermsieTerminalView: LocalProcessTerminalView {
     /// Output was applied to the buffer. Unlike `onActivity` this is not throttled, because what
     /// listens to it debounces for itself and must not miss the last burst of a command.
     var onOutput: (() -> Void)?
+    /// Text was copied out of this terminal by ⌘C or auto-copy (nil text: there was nothing to
+    /// copy), so the pane can confirm it.
+    var onCopy: ((String?) -> Void)?
     /// Other views that should receive the same keyboard input. Returns [] when not broadcasting.
     var broadcastTargets: (() -> [TermsieTerminalView])?
     /// Whether something other than the shell owns the terminal right now. Asked of the pane,
@@ -27,6 +30,9 @@ final class TermsieTerminalView: LocalProcessTerminalView {
     var foregroundJobRunning: (() -> Bool)?
 
     var hasExited = false
+    /// Whether Option acts as Meta, as configured (and flipped by ⌥⌘O). SwiftTerm's own
+    /// `optionAsMetaKey` is re-derived from this for every key press by `prepareForKeyDown`.
+    var optionAsMetaPreferred = true
     /// True while the emulator (not the user) is producing bytes, e.g. replies to device queries.
     private var emulatorReplyInFlight = false
     private var lastActivityNotification: CFTimeInterval = 0
@@ -129,6 +135,44 @@ final class TermsieTerminalView: LocalProcessTerminalView {
         markScanner.reset()
     }
 
+    // MARK: Keyboard
+
+    /// Decides, for one key press, whether Option is Meta. Called from the app's key monitor
+    /// before SwiftTerm sees the event, because SwiftTerm's `keyDown` cannot be overridden.
+    ///
+    /// Many layouts type characters a shell needs with Option: `@` is ⌥2 on Finnish, Swedish and
+    /// German keyboards, and `[ ] { } | \ ~ $` sit there too. With Option as Meta those keys sent
+    /// ESC plus the base key instead, so the `@` never appeared. When the layout says Option
+    /// produces a printable ASCII character, that character is what the user meant. On a US
+    /// layout every Option character is non-ASCII (⌥B is ∫), so Meta keeps working there.
+    func prepareForKeyDown(_ event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains([.option, .command]), event.charactersIgnoringModifiers == "o" {
+            // SwiftTerm toggles its live flag for this chord; remember it as the preference.
+            optionAsMetaPreferred.toggle()
+            optionAsMetaKey = !optionAsMetaPreferred
+            return
+        }
+        optionAsMetaKey = optionAsMetaPreferred && !Self.optionTypesCharacter(event)
+    }
+
+    /// True when Option is held (without Command or Control) and the layout turns the key into a
+    /// printable ASCII character that differs from the bare key.
+    static func optionTypesCharacter(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.option), flags.isDisjoint(with: [.command, .control]),
+              let typed = event.characters, typed != event.charactersIgnoringModifiers else { return false }
+        return isLayoutSymbol(typed)
+    }
+
+    /// A single printable ASCII character, excluding space (⌥Space types a non-breaking space,
+    /// which is not ASCII anyway).
+    static func isLayoutSymbol(_ text: String) -> Bool {
+        let scalars = text.unicodeScalars
+        guard scalars.count == 1, let s = scalars.first else { return false }
+        return (0x21...0x7e).contains(s.value)
+    }
+
     override func bell(source: Terminal) {
         super.bell(source: source)
         onBell?()
@@ -162,6 +206,7 @@ final class TermsieTerminalView: LocalProcessTerminalView {
         guard let text = getSelection(), !text.isEmpty, text != lastAutoCopied else { return false }
         lastAutoCopied = text
         Self.writeToClipboard(text)
+        onCopy?(text)
         return true
     }
 
@@ -313,6 +358,17 @@ final class TermsieTerminalView: LocalProcessTerminalView {
         return "marks=\(markState.hasMarks) lifecycle=\(markState.lifecycle) lifecycleMarks=\(markState.reportsCommandLifecycle)"
             + " autoCopy=\(ConfigStore.shared.config.copy.autoCopyOnSelect)"
             + " selection=\(a.selection) lastOutput=\(a.lastCommandOutput) lastCommand=\(a.lastCommand)"
+    }
+
+    /// ⌘C. SwiftTerm's own copy writes the clipboard even with nothing selected, wiping what was
+    /// there for an empty string; that case now leaves the clipboard alone and says so.
+    override func copy(_ sender: Any) {
+        guard let text = getSelection(), !text.isEmpty else {
+            onCopy?(nil)
+            return
+        }
+        super.copy(sender)
+        onCopy?(text)
     }
 
     static func writeToClipboard(_ text: String) {

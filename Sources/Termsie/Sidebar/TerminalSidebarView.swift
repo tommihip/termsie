@@ -332,7 +332,9 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
         view.isBusy = pane?.hasRunningJob ?? false
         view.isActivePane = (id == activeID)
         view.title = pane?.displayTitle ?? def.displayName
-        view.subtitle = pane?.displayDirectory ?? (def.cwd.map(ProcessInspector.abbreviateHome) ?? "")
+        view.subtitle = pane?.displayDirectory
+            ?? def.ssh.map { "ssh " + $0.destination }
+            ?? (def.cwd.map(ProcessInspector.abbreviateHome) ?? "")
         view.badge = pane?.header.badge ?? .none
         let config = ConfigStore.shared.config
         let style = config.environment(def.environment)
@@ -507,13 +509,13 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
     }
 
     @objc private func contextReveal(_ sender: Any?) {
-        guard let id = contextID(sender),
+        guard let id = contextID(sender), registry.definition(id)?.ssh == nil,
               let dir = registry.pane(for: id)?.currentDirectory ?? registry.definition(id)?.cwd else { return }
         let path = (dir as NSString).expandingTildeInPath
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
     @objc private func contextCopyPath(_ sender: Any?) {
-        guard let id = contextID(sender),
+        guard let id = contextID(sender), registry.definition(id)?.ssh == nil,
               let dir = registry.pane(for: id)?.currentDirectory ?? registry.definition(id)?.cwd else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString((dir as NSString).expandingTildeInPath, forType: .string)

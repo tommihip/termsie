@@ -66,6 +66,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     private var hasUnseenBell = false
     private var pollTimer: Timer?
     private var findBar: FindBarView?
+    private let copyToast = CopyToastView()
     private var startedAt: CFTimeInterval = 0
     /// Redraws provoked by a resize are not news, so the activity badge ignores output until this
     /// time. Set whenever the character grid changes.
@@ -80,6 +81,10 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     private var metalRequested = false
     private var shellName = "shell"
     private var integration = ShellIntegration.Plan.disabled
+    /// The connection this terminal runs `ssh` to, or nil for a local shell.
+    private let sshConnection: SSHConnection?
+    /// The SSH session's private folder (stored key, askpass state), removed when it ends.
+    private var sshPrivateDirectory: URL?
 
     // MARK: Init
 
@@ -91,12 +96,13 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
             font: config.resolvedFont(family: definition.fontFamily, size: definition.fontSize),
             options: options)
         scrollHost = TerminalScrollHost(terminalView: terminalView)
+        sshConnection = definition.ssh
         super.init(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         scrollHost.onVisibleColumnsChange = { [weak self] in self?.thumbnailDirty = true }
         initialDirectory = definition.cwd
         startupCommands = runCommands ? definition.commands(isReopen: isReopen) : []
         customTitle = definition.name
-        shellName = (config.resolvedShell as NSString).lastPathComponent
+        shellName = definition.ssh == nil ? (config.resolvedShell as NSString).lastPathComponent : "ssh"
 
         wantsLayer = true
         layer?.masksToBounds = false
@@ -117,6 +123,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         terminalView.processDelegate = self
         scrollHost.autoresizingMask = []
         content.addSubview(scrollHost)
+        content.addSubview(copyToast)
 
         terminalView.onActivity = { [weak self] in self?.noteActivity() }
         terminalView.onBell = { [weak self] in self?.noteBell() }
@@ -128,6 +135,9 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         terminalView.onInputAfterExit = { [weak self] in
             guard let self else { return }
             self.controller?.closePane(self, force: true)
+        }
+        terminalView.onCopy = { [weak self] text in
+            self?.confirmCopy(.selection, text: text)
         }
         terminalView.foregroundJobRunning = { [weak self] in self?.hasRunningJob ?? false }
         terminalView.broadcastTargets = { [weak self] in
@@ -174,6 +184,11 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         env.merge(variables.values) { _, new in new }
         env["TERMSIE_PANE_ID"] = definitionID
 
+        if let connection = sshConnection {
+            startSSH(connection, env: env, missingSecrets: variables.missing)
+            return
+        }
+
         let wantsIsolation = controller?.registry.definition(definitionID)?.isolatedHistory ?? true
         integration = ShellIntegration.prepare(shell: config.resolvedShell,
                                                shellArgs: config.shellArgs,
@@ -210,6 +225,51 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         refreshHeader()
     }
 
+    /// Starts `ssh` in place of a shell. There is no local shell to shim, so the startup
+    /// commands and the working folder travel to the server as its command line instead.
+    private func startSSH(_ connection: SSHConnection, env baseEnv: [String: String], missingSecrets: [String]) {
+        var env = baseEnv
+        integration = .disabled
+        startedAt = CACurrentMediaTime()
+        restoreOutput()
+        let secretsFile = DebugDriver.isActive ? SecretStore.testFilePath : nil
+        switch SSHLaunch.prepare(connection, commands: startupCommands, remoteDirectory: initialDirectory,
+                                 secretsFile: secretsFile) {
+        case .failure(.invalid(let problem)):
+            terminalView.feed(text: "\r\n\u{1b}[33m[cannot connect: \(problem) — fix it in SSH Connection…]\u{1b}[0m\r\n")
+            // Behaves like a process that failed at once, so any key closes it.
+            exitCode = 255
+            terminalView.hasExited = true
+            refreshHeader()
+            // After the pane has finished opening, which is still on the stack.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.controller?.paneProcessExited(self, exitCode: 255)
+            }
+            return
+        case .success(let plan):
+            env.merge(plan.environment) { _, new in new }
+            sshPrivateDirectory = plan.privateDirectory
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            terminalView.startProcess(executable: plan.executable, args: plan.args,
+                                      environment: env.map { "\($0.key)=\($0.value)" },
+                                      execName: nil, currentDirectory: home)
+        }
+        if !missingSecrets.isEmpty {
+            let names = missingSecrets.joined(separator: ", ")
+            terminalView.feed(text: "\r\n\u{1b}[33m[secret \(names) not found in the Keychain — not set]\u{1b}[0m\r\n")
+        }
+        startPolling()
+        refreshHeader()
+    }
+
+    var isSSH: Bool { sshConnection != nil }
+
+    func removeSSHPrivateDirectory() {
+        SSHLaunch.removePrivateDirectory(sshPrivateDirectory)
+        sshPrivateDirectory = nil
+    }
+
     /// Expands and validates a configured folder. A missing one falls back to home *and says so*,
     /// rather than silently opening wherever the app happened to be launched from.
     static func resolveDirectory(_ dir: String?) -> (path: String?, warning: String?) {
@@ -236,6 +296,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         if terminalView.process?.running == true {
             terminalView.terminate()
         }
+        removeSSHPrivateDirectory()
     }
 
     var shellPid: pid_t { terminalView.process?.shellPid ?? 0 }
@@ -301,6 +362,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         terminalView.caretColor = NSColor.hex(colors.cursor)
         terminalView.selectedTextBackgroundColor = NSColor.hex(colors.selection)
         terminalView.installColors(config.ansiColors)
+        terminalView.optionAsMetaPreferred = config.optionAsMeta
         terminalView.optionAsMetaKey = config.optionAsMeta
         terminalView.bellStyle = config.terminalBellStyle
         showsHeader = config.showPaneHeaders
@@ -404,12 +466,17 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
     var displayTitle: String {
         if let t = customTitle, !t.isEmpty { return t }
         if !oscTitle.isEmpty { return oscTitle }
-        if let job = foregroundJob, !job.isEmpty { return job }
+        if let job = foregroundJob, !job.isEmpty, !(isSSH && job == "ssh") { return job }
+        if let ssh = sshConnection { return ssh.destination }
         return shellName
     }
 
     var displayDirectory: String {
-        currentDirectory.map(ProcessInspector.abbreviateHome) ?? ""
+        if let ssh = sshConnection {
+            // Only known if the server's shell reports it (OSC 7); the destination always is.
+            return "ssh " + ssh.destination + (currentDirectory.map { " · " + $0 } ?? "")
+        }
+        return currentDirectory.map(ProcessInspector.abbreviateHome) ?? ""
     }
 
     func refreshHeader() {
@@ -497,6 +564,9 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
             bar.frame = NSRect(x: termFrame.maxX - w - 8, y: termFrame.maxY - FindBarView.height - 8,
                                width: w, height: FindBarView.height)
         }
+        let toastW = min(CopyToastView.preferredWidth, max(0, termFrame.width - 24))
+        copyToast.frame = NSRect(x: termFrame.midX - toastW / 2, y: termFrame.minY + 14,
+                                 width: toastW, height: CopyToastView.height)
         // Without an explicit path, Core Animation derives the shadow from the alpha channel every
         // frame, which over a Metal layer is a per-frame offscreen pass.
         layer?.shadowPath = CGPath(roundedRect: contentFrame, cornerWidth: radius,
@@ -727,10 +797,32 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
         case .wholeTerminal: text = terminalView.wholeTerminalText()
         case .lastCommand: text = terminalView.lastCommandText()
         }
-        guard let text, !text.isEmpty else { return false }
+        guard let text, !text.isEmpty else {
+            confirmCopy(target, text: nil)
+            return false
+        }
         TermsieTerminalView.writeToClipboard(text)
+        confirmCopy(target, text: text)
         return true
     }
+
+    /// Shows what a copy did on this terminal, and tells VoiceOver. `nil` text: nothing copied.
+    func confirmCopy(_ target: CopyTarget, text: String?) {
+        let message = text.map { CopyToastView.message(copied: $0, target: target) }
+            ?? CopyToastView.message(nothingFor: target)
+        if DebugDriver.isActive {
+            NSLog("DebugDriver toast: [%@] [%@]", message.title, message.detail ?? "")
+        }
+        NSAccessibility.post(element: self, notification: .announcementRequested,
+                             userInfo: [.announcement: message.title, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        guard ConfigStore.shared.config.copy.showConfirmation else { return }
+        let colors = ConfigStore.shared.config.colors
+        content.addSubview(copyToast, positioned: .above, relativeTo: nil)
+        copyToast.show(message, accent: NSColor.hex(colors.activeBorder), warning: NSColor.hex(colors.bell))
+    }
+
+    /// True while a copy confirmation is on screen.
+    var showsCopyToast: Bool { copyToast.isShowing }
 
     /// Types commands into an already-running shell: "Apply now" in the settings editor, the
     /// run button in the terminal list, and Run All.
@@ -832,6 +924,7 @@ final class TerminalPane: NSView, LocalProcessTerminalViewDelegate {
             return signal == 0 ? (status >> 8) & 0xff : 128 + signal
         }
         terminalView.hasExited = true
+        removeSSHPrivateDirectory()
         pollTimer?.invalidate()
         pollTimer = nil
         foregroundJob = nil
