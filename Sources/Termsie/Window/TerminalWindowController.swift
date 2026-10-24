@@ -599,6 +599,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate, NSMe
         newTerminal()
     }
 
+    func sidebarDidRequestNewSSH() {
+        newSSHTerminal(nil)
+    }
+
+    /// The sidebar's New Terminal menu, for the headless tests.
+    var sidebarAddMenu: NSMenu { sidebar.addMenuForTesting() }
+
     func sidebarDidRequestRunCommands(_ id: String) {
         runStartupCommands(for: id, askIfBusy: true)
     }

@@ -137,14 +137,40 @@ final class TerminalScrollHost: NSView {
     /// vertical scroller. Borrowing its arithmetic means never having to guess that strip's width,
     /// and the expression settles after one layout pass: once the grid is the width we asked for,
     /// `getOptimalFrameSize` returns exactly what we return here.
+    ///
+    /// It is also capped at what the GPU can draw. A layer wider than the largest texture is
+    /// rendered smaller and stretched, which turns every glyph into a smear — and the limit is in
+    /// pixels, so 2000 columns that fit at 1× on an external display (about 12,000 px at 10 pt)
+    /// do not fit at 2× on a Retina one. The grid then has as many columns as fit.
     private func contentWidth(in box: NSRect) -> CGFloat {
         guard !wrapsLines else { return box.width }
         let cols = terminalView.getTerminal().cols
         let optimal = terminalView.getOptimalFrameSize().width
-        guard cols > 0, optimal > 0 else {
-            return max(box.width, CGFloat(unwrappedColumns) * cellWidth)
+        let wanted: CGFloat
+        if cols > 0, optimal > 0 {
+            wanted = optimal + CGFloat(unwrappedColumns - cols) * cellWidth
+        } else {
+            wanted = CGFloat(unwrappedColumns) * cellWidth
         }
-        return max(box.width, optimal + CGFloat(unwrappedColumns - cols) * cellWidth)
+        return max(box.width, min(wanted, maxDrawableWidth))
+    }
+
+    /// The largest texture dimension of every Mac GPU Metal runs on (Apple silicon, and the
+    /// Intel/AMD Macs macOS 14 supports).
+    static let maxTexturePixels: CGFloat = 16384
+
+    /// The widest the terminal view can be, in points, at this window's scale, whole cells only.
+    var maxDrawableWidth: CGFloat {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let limit = (Self.maxTexturePixels / scale).rounded(.down) - 1
+        return (limit / cellWidth).rounded(.down) * cellWidth
+    }
+
+    /// The window moved to a display with a different scale, so both the cell width and the
+    /// widest drawable changed with it.
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        invalidate()
     }
 
     override func layout() {

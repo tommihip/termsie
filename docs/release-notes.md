@@ -1,27 +1,20 @@
-Termsie 0.9.0 — universal, signed with a Developer ID and notarised by Apple.
+Termsie 0.9.1 — universal, signed with a Developer ID and notarised by Apple.
+
+## What's fixed
+
+- **Sharp text on Retina displays with line wrapping off.** A terminal with wrapping off is
+  as wide as all of its columns, and with a large *Columns when lines are not wrapped*
+  setting that could be more than the graphics card can draw at 2×, so text on a MacBook's
+  built-in display turned into an unreadable blur while external 1× displays looked fine.
+  Such a terminal now gets as many columns as can be drawn sharply — about 1000 at 13 pt on
+  a Retina display, twice that on a 1× one — and adjusts when the window moves between
+  displays.
 
 ## What's new
 
-- **SSH terminals.** A terminal can now be a connection to a server instead of a local
-  shell: **Shell ▸ New SSH Terminal…** (⇧⌘N), or **Connect over SSH…** in any terminal's
-  settings. It runs your own `ssh`, so `~/.ssh/config`, the SSH agent, `known_hosts` and
-  ProxyJump all work as they always have.
-- **Saved logins, kept in the Keychain.** An SSH terminal can remember its password, its
-  key's passphrase, or the private key itself. They are typed for you when `ssh` asks and
-  are never shown, written to a workspace file or put in your history. A stored password
-  that turns out to be wrong is tried once, and then you are asked in the terminal.
-- **Startup commands and folders on the server.** An SSH terminal's startup commands run on
-  the server before its shell starts, and its working folder is a folder there. Close it
-  and click it in the list to reconnect.
-- **You can see that a copy worked.** Every copy — ⌘C, the copy tools, their shortcuts and
-  auto-copy on select — now shows a short note on the terminal saying what was copied, how
-  many lines, and how it begins. If there was nothing to copy, it says so and why, rather
-  than leaving you to guess. ⌘C with nothing selected no longer empties the clipboard. The
-  note can be turned off in Settings ▸ General.
-- **Option keys type what your keyboard says.** On Finnish, Swedish, German and similar
-  layouts, ⌥2 now types `@` (and `[ ] { } | \ ~` work too) instead of being taken as Meta.
-  Option still works as Meta for word movement wherever the layout has no character there,
-  including on a US keyboard.
+- **New SSH terminals from the terminal list.** The **New Terminal** button at the bottom of
+  the list now opens a small menu: **New Terminal** or **New SSH Terminal…**. ⌘D and ⇧⌘N work
+  as before.
 
 **Install:** download the `.dmg` below and drag Termsie to your Applications folder, or
 

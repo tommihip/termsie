@@ -420,6 +420,27 @@ check "and the general setting shows the same value" \
       "$(print -r -- "$out" | grep 'readSetting: \[Copy a selection as soon\] shown=true')"
 check "a copy shortcut still copies"        "$(clip "$out" 1 | grep 'TOOLSHIDDEN')"
 
+print "\n== New Terminal in the list offers a local or an SSH terminal"
+fix=$ROOT/addmenu; mkdir -p $fix
+out=$(run $fix "wait,dumpAddMenu,pickAddMenu:1,wait,frames,pickAddMenu:2,wait,dumpSheet" --cwd $HOME)
+check "the menu has both choices"            "$(print -r -- "$out" | grep -F 'addMenu: [New Terminal | New SSH Terminal…]')"
+check "the first opens a local terminal"     "$(print -r -- "$out" | grep -c 'DebugDriver frame: #' | grep -E '^2$')"
+check "the second asks where to connect"     "$(print -r -- "$out" | grep 'sheet:.*New SSH Terminal')"
+
+print "\n== an unwrapped grid never outgrows what the GPU can draw"
+# 2000 columns fit in a texture at 1x but not at 2x; past the limit Metal stretches a smaller
+# drawable and every glyph smears. The grid must stop at the widest drawable instead.
+fix=$ROOT/widegrid; mkdir -p $fix/termsie
+print '{"lineWrap":false,"unwrappedColumns":2000}' > $fix/termsie/config.json
+out=$(run $fix "wait,wait,dumpGrid" --cwd $HOME)
+px=$(print -r -- "$out" | grep -o 'widthPx=[0-9]*' | tail -1 | cut -d= -f2)
+cols=$(print -r -- "$out" | grep -o 'cols=[0-9]*' | tail -1 | cut -d= -f2)
+check "the terminal fits in a 16384-pixel texture ($px px)" "$([[ -n "$px" ]] && (( px <= 16384 )) && echo yes)"
+check "and still has a wide grid ($cols columns)"        "$([[ -n "$cols" ]] && (( cols >= 500 )) && echo yes)"
+print '{"lineWrap":false,"unwrappedColumns":300}' > $fix/termsie/config.json
+out=$(run $fix "wait,wait,dumpGrid" --cwd $HOME)
+check "a grid that fits keeps exactly its columns"       "$(print -r -- "$out" | grep 'grid: cols=300 ')"
+
 print "\n== every copy says what it copied, or that nothing was"
 fix=$ROOT/copytoast; mkdir -p $fix/termsie
 print '{}' > $fix/termsie/config.json

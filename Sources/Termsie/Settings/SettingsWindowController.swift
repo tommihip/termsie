@@ -170,7 +170,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate,
         generalForm.number("Columns when lines are not wrapped", \.unwrappedColumnsValue,
                            range: Double(TermsieConfig.minUnwrappedColumns)...Double(TermsieConfig.maxUnwrappedColumns),
                            step: 10, isInteger: true, suffix: "cols",
-                           hint: "The width an unwrapped terminal reports to the shell. Anything past it is still discarded, because that is what a terminal does — so this is how far right you can scroll.")
+                           hint: "The width an unwrapped terminal reports to the shell. Anything past it is still discarded, because that is what a terminal does — so this is how far right you can scroll. A very wide grid is limited to what the graphics card can draw, which on a Retina display is about 1000 columns at 13 pt.")
 
         generalForm.section("Copying")
         generalForm.checkbox("Copy a selection as soon as it is made", \.copy.autoCopyOnSelect,

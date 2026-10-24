@@ -9,6 +9,7 @@ protocol TerminalSidebarDelegate: AnyObject {
     func sidebarDidRequestDuplicate(_ id: String)
     func sidebarDidReorder()
     func sidebarDidRequestNew()
+    func sidebarDidRequestNewSSH()
     func sidebarDidRequestRunCommands(_ id: String)
     func sidebarDidRequestRunAllCommands()
     func sidebarDidSetEnvironment(_ environment: String?, for id: String)
@@ -68,6 +69,7 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
         scrollView.autoresizingMask = [.width, .height]
         addSubview(scrollView)
         footer.onAdd = { [weak self] in self?.delegate?.sidebarDidRequestNew() }
+        footer.onAddSSH = { [weak self] in self?.delegate?.sidebarDidRequestNewSSH() }
         footer.onRunAll = { [weak self] in self?.delegate?.sidebarDidRequestRunAllCommands() }
         addSubview(footer)
         copyTools.onAction = { [weak self] target in self?.delegate?.sidebarDidRequestCopy(target) }
@@ -199,6 +201,9 @@ final class TerminalSidebarView: NSView, NSTableViewDataSource, NSTableViewDeleg
     }
 
     // MARK: Refresh
+
+    /// The New Terminal menu's items, for the headless tests (a real popup would block them).
+    func addMenuForTesting() -> NSMenu { footer.makeAddMenu() }
 
     func reloadAll() {
         rowMetrics = TerminalRowView.Metrics.forWidth(bounds.width > 0 ? bounds.width : TerminalRowView.Metrics.fullWidth,

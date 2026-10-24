@@ -317,6 +317,16 @@ enum DebugDriver {
                 let n = controller.displayedNames(for: id)
                 NSLog("DebugDriver name: id=\(id) header=[\(n.header ?? "-")] row=[\(n.row)]")
             }
+        } else if action == "dumpGrid", let view = controller?.activePane?.terminalView {
+            let scale = view.window?.backingScaleFactor ?? 0
+            NSLog("DebugDriver grid: cols=\(view.getTerminal().cols) widthPx=\(Int(view.frame.width * scale)) scale=\(scale)")
+        } else if action == "dumpAddMenu", let controller {
+            let titles = controller.sidebarAddMenu.items.map(\.title)
+            NSLog("DebugDriver addMenu: [%@]", titles.joined(separator: " | "))
+        } else if action.hasPrefix("pickAddMenu:"), let controller, let n = Int(action.dropFirst(12)) {
+            // pickAddMenu:2 chooses the second item, as a click in the popup would.
+            let menu = controller.sidebarAddMenu
+            if n >= 1, n <= menu.items.count { menu.performActionForItem(at: n - 1) }
         } else if action == "dumpToast", let controller {
             NSLog("DebugDriver toastVisible: \(controller.activePane?.showsCopyToast == true)")
         } else if action == "readout", let controller {

@@ -268,7 +268,10 @@ Every key is optional.
   the text on screen runs past the right edge. Typing scrolls the caret back into view, and a
   sideways trackpad swipe or ⇧-scroll moves the view. A terminal emulator still discards anything
   past its last column, so `unwrappedColumns` is both the width programs lay out to and how far
-  right you can scroll. Individual terminals can override `lineWrap`.
+  right you can scroll. Individual terminals can override `lineWrap`. The grid never grows wider
+  than the GPU can draw (16,384 pixels): about 1000 columns at 13 pt on a Retina display, twice
+  that on a 1× one. Past that, text would be drawn smaller and stretched into a blur, so a larger
+  setting gets as many columns as fit, and changes when the window moves between displays.
 - `environments`: your own list, in menu order. A `tint` of `null` means no colour; `strength` is
   how far the background is pulled toward the tint.
 - `shellIntegration`: `"off"` disables the history, startup-command and command-mark machinery
@@ -391,7 +394,8 @@ Like any environment variable, a secret is visible to processes running as you (
 
 ### SSH terminals
 
-**Shell ▸ New SSH Terminal…** (⇧⌘N) asks where to connect and opens the session. **Connect over
+**Shell ▸ New SSH Terminal…** (⇧⌘N), or **New Terminal ▸ New SSH Terminal…** at the bottom of the
+terminal list, asks where to connect and opens the session. **Connect over
 SSH…** in an existing terminal's settings turns that terminal into one, and **Use Local Shell** in
 the same sheet turns it back. The connection holds:
 

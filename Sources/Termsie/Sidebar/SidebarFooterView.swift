@@ -1,12 +1,16 @@
 import AppKit
 
 /// The strip along the bottom of the terminal list: New Terminal, and Run All beside it.
+///
+/// New Terminal opens a small menu — a local terminal or an SSH one — rather than acting at once,
+/// so an SSH terminal can be made from the list as well as from the Shell menu.
 final class SidebarFooterView: NSView {
     static let height: CGFloat = 30
 
     enum Zone { case add, runAll }
 
     var onAdd: (() -> Void)?
+    var onAddSSH: (() -> Void)?
     var onRunAll: (() -> Void)?
     /// Whether any terminal has startup commands. Run All is shown dimmed and does nothing when
     /// none does, rather than disappearing and moving New Terminal about.
@@ -61,7 +65,7 @@ final class SidebarFooterView: NSView {
 
     private func updateToolTips() {
         removeAllToolTips()
-        addToolTip(rect(for: .add), owner: "New terminal (\u{2318}D)" as NSString, userData: nil)
+        addToolTip(rect(for: .add), owner: "New terminal or SSH terminal" as NSString, userData: nil)
         let run = runAllEnabled ? "Run the startup commands of every terminal in this workspace"
                                 : "No terminal in this workspace has startup commands"
         addToolTip(rect(for: .runAll), owner: run as NSString, userData: nil)
@@ -85,11 +89,42 @@ final class SidebarFooterView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         switch zone(at: convert(event.locationInWindow, from: nil)) {
-        case .add: onAdd?()
+        case .add: showAddMenu()
         case .runAll: if runAllEnabled { onRunAll?() } else { NSSound.beep() }
         case nil: break
         }
     }
+
+    // MARK: New terminal menu
+
+    /// The choices behind New Terminal. Shortcuts are shown for reference; the Shell menu owns them.
+    func makeAddMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let local = NSMenuItem(title: "New Terminal", action: #selector(addLocal), keyEquivalent: "d")
+        local.keyEquivalentModifierMask = [.command]
+        local.image = NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)
+        let ssh = NSMenuItem(title: "New SSH Terminal…", action: #selector(addSSH), keyEquivalent: "n")
+        ssh.keyEquivalentModifierMask = [.command, .shift]
+        ssh.image = NSImage(systemSymbolName: "network", accessibilityDescription: nil)
+        for item in [local, ssh] {
+            item.target = self
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    private func showAddMenu() {
+        let menu = makeAddMenu()
+        // Opens upward from the top edge of the button, the only direction with room for it.
+        let zone = rect(for: .add)
+        let height = menu.size.height
+        menu.popUp(positioning: nil, at: NSPoint(x: zone.minX + 4, y: zone.minY - height - 2), in: self)
+        hovering = nil
+    }
+
+    @objc private func addLocal() { onAdd?() }
+    @objc private func addSSH() { onAddSSH?() }
 
     // MARK: Drawing
 
@@ -131,6 +166,18 @@ final class SidebarFooterView: NSView {
             .font: UIFonts.system(size: 11, weight: .medium), .foregroundColor: tint,
         ])
         label.draw(at: NSPoint(x: x + 14, y: midY - label.size().height / 2))
+
+        // A small upward chevron says there is a choice behind the button.
+        let cx = x + 14 + label.size().width + 9
+        let chevron = NSBezierPath()
+        chevron.lineWidth = 1.3
+        chevron.lineCapStyle = .round
+        chevron.lineJoinStyle = .round
+        chevron.move(to: NSPoint(x: cx - 3.5, y: midY + 1.5))
+        chevron.line(to: NSPoint(x: cx, y: midY - 2))
+        chevron.line(to: NSPoint(x: cx + 3.5, y: midY + 1.5))
+        tint.withAlphaComponent(tint.alphaComponent * 0.7).setStroke()
+        chevron.stroke()
     }
 
     private func drawRunAll(in zone: NSRect, colors: TermsieConfig.Colors, midY: CGFloat) {
